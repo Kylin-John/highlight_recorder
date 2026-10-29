@@ -17,10 +17,10 @@ import android.util.Log
 import com.highlightrecorder.buffer.ClipWriter
 import com.highlightrecorder.capture.CapturePipeline
 import com.highlightrecorder.data.FileLogger
+import com.highlightrecorder.data.OverlayLongPressAction
 import com.highlightrecorder.data.SettingsHolder
 import com.highlightrecorder.data.needsMic
 import com.highlightrecorder.overlay.OverlayManager
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -46,6 +46,7 @@ class RecordingService : Service() {
         const val ACTION_START = "com.highlightrecorder.action.START"
         const val ACTION_STOP = "com.highlightrecorder.action.STOP"
         const val ACTION_SAVE = "com.highlightrecorder.action.SAVE"
+        const val ACTION_OVERLAY_LONG_PRESS = "com.highlightrecorder.action.OVERLAY_LONG_PRESS"
         const val ACTION_REFRESH_OVERLAY = "com.highlightrecorder.action.REFRESH_OVERLAY"
         const val EXTRA_RESULT_CODE = "extra_result_code"
         const val EXTRA_RESULT_DATA = "extra_result_data"
@@ -55,6 +56,7 @@ class RecordingService : Service() {
 
         val state = MutableStateFlow<State>(State.Idle)
         val bufferedSeconds = MutableStateFlow(0)
+        val estimatedSaveSeconds = MutableStateFlow(0)
         val savedEvents = MutableSharedFlow<SavedEvent>(extraBufferCapacity = 4)
 
         fun startIntent(context: Context, resultCode: Int, data: Intent): Intent =
@@ -78,6 +80,7 @@ class RecordingService : Service() {
     data class SavedEvent(val uri: String, val durationMs: Long)
 
     private var pipeline: CapturePipeline? = null
+    private var saveSession: RecordingSaveSession? = null
     private var projection: MediaProjection? = null
     private var ticker: Job? = null
     private var overlay: OverlayManager? = null
@@ -142,6 +145,7 @@ class RecordingService : Service() {
             }
             ACTION_STOP -> stopRecording()
             ACTION_SAVE -> saveClip()
+            ACTION_OVERLAY_LONG_PRESS -> onOverlayLongPress()
             ACTION_REFRESH_OVERLAY -> refreshOverlay()
             else -> Log.w(TAG, "unknown action: ${intent?.action}")
         }
@@ -165,6 +169,7 @@ class RecordingService : Service() {
             val proj = mpm.getMediaProjection(resultCode, data)
             proj.registerCallback(object : MediaProjection.Callback() {
                 override fun onStop() {
+                    if (projection !== proj) return
                     Log.w(TAG, "projection stopped by system")
                     stopRecording()
                 }
@@ -175,6 +180,7 @@ class RecordingService : Service() {
             val p = CapturePipeline(this, settings, proj)
             p.listener = object : CapturePipeline.Listener {
                 override fun onError(t: Throwable) {
+                    if (pipeline !== p) return
                     Log.e(TAG, "pipeline error", t)
                     fail("编码出错: ${describe(t)}")
                 }
@@ -182,6 +188,7 @@ class RecordingService : Service() {
                 override fun onVideoFormat(format: MediaFormat) = Unit
 
                 override fun onRotationChanged() {
+                    if (pipeline !== p) return
                     // 重建悬浮窗并钳制回屏幕内,防止旋转后坐标出屏"消失"
                     FileLogger.log(TAG, "onRotationChanged: rebuild overlay")
                     try {
@@ -195,13 +202,15 @@ class RecordingService : Service() {
                 }
 
                 override fun onAudioUnavailable(reason: String) {
+                    if (pipeline !== p) return
                     // 音频失败不再静默:通知栏常驻提示,避免用户录完才发现无声
                     FileLogger.log(TAG, "audio unavailable: $reason")
                     updateNotification("音频不可用,已静音录制($reason)")
                 }
             }
-            p.start()
             pipeline = p
+            saveSession = RecordingSaveSession()
+            p.start()
             state.value = State.Recording
             startTicker()
             showOverlay()
@@ -211,15 +220,6 @@ class RecordingService : Service() {
                     addAction(Intent.ACTION_BATTERY_LOW)
                     addAction(Intent.ACTION_BATTERY_OKAY)
                 })
-            }
-            scope.launch {
-                savedEvents.collect { ev ->
-                    android.widget.Toast.makeText(
-                        this@RecordingService,
-                        "已保存 %.1f 秒高光".format(ev.durationMs / 1000f),
-                        android.widget.Toast.LENGTH_SHORT,
-                    ).show()
-                }
             }
             FileLogger.log(TAG, "recording started, rewind=${settings.rewindSeconds}s")
         } catch (t: Throwable) {
@@ -240,20 +240,25 @@ class RecordingService : Service() {
         FileLogger.log(TAG, "recording stopped")
         cleanup()
         state.value = State.Idle
-        bufferedSeconds.value = 0
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
 
     /** 保存点击时固定的媒体范围,编码与录制全程不中断。 */
-    private fun saveClip() {
+    private fun saveClip(stopAfterSave: Boolean = false) {
         val p = pipeline ?: run {
             Log.w(TAG, "save ignored: not recording")
             return
         }
+        val session = saveSession ?: return
         val settings = SettingsHolder.current
-        if (state.value == State.Saving) {
-            android.widget.Toast.makeText(this, "正在保存,请稍候再试;录制仍在继续", android.widget.Toast.LENGTH_SHORT).show()
+        if (state.value == State.Saving || session.saving) {
+            val message = if (stopAfterSave) {
+                "正在保存,录制仍在继续;请在本次保存完成后再次长按以保存后停止"
+            } else {
+                "正在保存,请稍候再试;录制仍在继续"
+            }
+            android.widget.Toast.makeText(this, message, android.widget.Toast.LENGTH_LONG).show()
             return
         }
         val snapshot = p.snapshot(settings.rewindSeconds * 1_000_000L, settings.saveMode) ?: run {
@@ -265,26 +270,61 @@ class RecordingService : Service() {
 
         scope.launch {
             try {
-                val result = withContext(Dispatchers.IO) {
-                    ClipWriter.write(
-                        this@RecordingService, snapshot.clip.video, snapshot.clip.audio, snapshot.videoFormat,
-                        if (snapshot.clip.audio.isEmpty()) null else snapshot.audioFormat,
-                    )
-                }
-                // 停止后又开始录制时,旧任务不能改新会话的状态或通知。
-                if (pipeline !== p) return@launch
-                p.onSaved(snapshot)
-                savedEvents.tryEmit(SavedEvent(result.uri.toString(), result.durationMs))
-                updateNotification("已保存 %.1f 秒高光".format(result.durationMs / 1000f))
-            } catch (t: CancellationException) {
-                throw t
-            } catch (t: Throwable) {
-                Log.e(TAG, "save failed", t)
-                if (pipeline === p) updateNotification("保存失败: ${t.message}")
+                session.save(
+                    stopAfterSave = stopAfterSave,
+                    write = {
+                        withContext(Dispatchers.IO) {
+                            ClipWriter.write(
+                                this@RecordingService, snapshot.clip.video, snapshot.clip.audio, snapshot.videoFormat,
+                                if (snapshot.clip.audio.isEmpty()) null else snapshot.audioFormat,
+                            )
+                        }
+                    },
+                    onSaved = { result ->
+                        p.onSaved(snapshot)
+                        updateDurations()
+                        savedEvents.tryEmit(SavedEvent(result.uri.toString(), result.durationMs))
+                        val message = "已保存 %.1f 秒高光".format(result.durationMs / 1000f)
+                        updateNotification(message)
+                        if (!stopAfterSave) {
+                            android.widget.Toast.makeText(this@RecordingService, message, android.widget.Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    onFailed = { t ->
+                        Log.e(TAG, "save failed", t)
+                        updateNotification("保存失败,录制仍在继续: ${t.message}")
+                        android.widget.Toast.makeText(
+                            this@RecordingService, "保存失败,录制仍在继续,请重试", android.widget.Toast.LENGTH_LONG,
+                        ).show()
+                    },
+                    stopRecording = {
+                        stopRecording()
+                        android.widget.Toast.makeText(this@RecordingService, "已保存并停止循环录制", android.widget.Toast.LENGTH_SHORT).show()
+                    },
+                )
             } finally {
-                if (pipeline === p && state.value == State.Saving) state.value = State.Recording
+                if (saveSession === session && state.value == State.Saving) state.value = State.Recording
             }
         }
+    }
+
+    private fun onOverlayLongPress() {
+        if (pipeline == null) return
+        if (SettingsHolder.current.overlayLongPressAction == OverlayLongPressAction.SAVE_AND_STOP) {
+            saveClip(stopAfterSave = true)
+        } else {
+            stopRecording()
+            android.widget.Toast.makeText(this, "已停止循环录制", android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun updateDurations() {
+        val p = pipeline
+        val settings = SettingsHolder.current
+        bufferedSeconds.value = ((p?.videoBuffer?.bufferedDurationUs ?: 0L) / 1_000_000L).toInt()
+        estimatedSaveSeconds.value = ((p?.estimatedSaveDurationUs(
+            settings.rewindSeconds * 1_000_000L, settings.saveMode,
+        ) ?: 0L) / 1_000_000L).toInt()
     }
 
     private fun startTicker() {
@@ -292,7 +332,7 @@ class RecordingService : Service() {
         stallRecoveries = 0
         ticker = scope.launch {
             while (isActive) {
-                bufferedSeconds.value = ((pipeline?.videoBuffer?.bufferedDurationUs ?: 0L) / 1_000_000L).toInt()
+                updateDurations()
                 checkVideoStall()
                 delay(500)
             }
@@ -322,23 +362,28 @@ class RecordingService : Service() {
     }
 
     private fun cleanup() {
+        saveSession?.close()
+        saveSession = null
         ticker?.cancel()
         ticker = null
         overlay?.hide()
         overlay = null
         runCatching { unregisterReceiver(batteryReceiver) }
         degraded = false
+        val p = pipeline
+        pipeline = null
         try {
-            pipeline?.stop()
+            p?.stop()
         } catch (t: Throwable) {
             Log.w(TAG, "pipeline stop", t)
         }
-        pipeline = null
+        val proj = projection
+        projection = null
         try {
-            projection?.stop()
+            proj?.stop()
         } catch (_: Throwable) {
         }
-        projection = null
+        updateDurations()
     }
 
     private fun fail(message: String) {

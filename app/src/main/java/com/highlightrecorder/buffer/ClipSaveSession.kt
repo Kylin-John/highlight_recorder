@@ -16,6 +16,10 @@ class ClipSaveSession(
 
     private var lastSavedEndPtsUs: Long? = null
 
+    @Synchronized
+    fun estimatedDurationUs(windowUs: Long, mode: SaveMode): Long =
+        videoBuffer.estimatedDurationUs(windowUs, if (mode == SaveMode.CONTINUATION) lastSavedEndPtsUs else null)
+
     /** 在接受请求时固定尾部;导出期间缓冲仍可继续接收编码包。 */
     @Synchronized
     fun snapshot(windowUs: Long, mode: SaveMode): Snapshot? {

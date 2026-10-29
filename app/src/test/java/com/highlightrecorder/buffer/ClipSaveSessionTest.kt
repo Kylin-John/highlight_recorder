@@ -29,6 +29,52 @@ class ClipSaveSessionTest {
     private fun capture(mode: SaveMode = SaveMode.CONTINUATION) = session.snapshot(window, mode)!!
 
     @Test
+    fun `两种模式预计时长与实际快照相符且不改变缓冲`() {
+        for (mode in SaveMode.entries) assertEquals(0L, session.estimatedDurationUs(window, mode))
+        feed(0, 601)
+        val buffered = video.bufferedDurationUs
+        val bytes = video.bufferedBytes
+        for (mode in SaveMode.entries) {
+            repeat(5) { assertEquals(180 * second + second / 2, session.estimatedDurationUs(window, mode)) }
+            val snap = capture(mode)
+            assertEquals(snap.endPtsUs - snap.video.first().startPtsUs, session.estimatedDurationUs(window, mode))
+        }
+        assertEquals(buffered, video.bufferedDurationUs)
+        assertEquals(bytes, video.bufferedBytes)
+    }
+
+    @Test
+    fun `预计时长按当前模式窗口和成功媒体边界切换`() {
+        feed(0, 601)
+        session.onSaved(capture())
+        assertEquals(0L, session.estimatedDurationUs(window, SaveMode.CONTINUATION))
+        assertEquals(180 * second + second / 2, session.estimatedDurationUs(window, SaveMode.LAST_WINDOW))
+        feed(602, 721)
+        assertEquals(60 * second + second / 2, session.estimatedDurationUs(window, SaveMode.CONTINUATION))
+        assertEquals(180 * second + second / 2, session.estimatedDurationUs(window, SaveMode.LAST_WINDOW))
+        for (mode in SaveMode.entries) {
+            assertEquals(30 * second + second / 2, session.estimatedDurationUs(30 * second, mode))
+        }
+        feed(722, 1201)
+        assertEquals(180 * second + second / 2, session.estimatedDurationUs(window, SaveMode.CONTINUATION))
+    }
+
+    @Test
+    fun `预计时长随实际保留窗口缩短并在清空后归零`() {
+        val shortVideo = RingSegmentBuffer(capacityUs = 5 * second)
+        val short = ClipSaveSession(shortVideo, audio)
+        for (i in 0..20) shortVideo.onPacket(EncodedPacket(byteArrayOf(1), i * second, true))
+        for (mode in SaveMode.entries) {
+            val snap = short.snapshot(window, mode)!!
+            val actual = snap.endPtsUs - snap.video.first().startPtsUs
+            assertTrue(actual < window)
+            assertEquals(actual, short.estimatedDurationUs(window, mode))
+        }
+        shortVideo.clear()
+        for (mode in SaveMode.entries) assertEquals(0L, short.estimatedDurationUs(window, mode))
+    }
+
+    @Test
     fun `默认模式每次仍保存最近窗口`() {
         assertEquals(SaveMode.LAST_WINDOW, RecordingSettings().saveMode)
         feed(0, 600) // 5:00
@@ -78,12 +124,15 @@ class ClipSaveSessionTest {
         video.onPacket(EncodedPacket(byteArrayOf(3), openSegmentAppendPts))
         audio.onPacket(EncodedPacket(byteArrayOf(4), openSegmentAppendPts))
         feed(602, 617) // 模拟耗时 8 秒的导出,继续写入后续分片
+        assertEquals(180 * second + second / 2, session.estimatedDurationUs(window, SaveMode.CONTINUATION))
         assertEquals(oldPackets, oldTail.packets)
         assertEquals(300 * second + second / 2, exporting.endPtsUs)
         assertEquals(exporting.endPtsUs, oldTail.endPtsUs)
         assertEquals(oldAudio, exporting.audio)
 
         session.onSaved(exporting) // 5:08.5 完成,提交的仍是 5:00.5
+        assertEquals(8 * second + second / 2, session.estimatedDurationUs(window, SaveMode.CONTINUATION))
+        assertEquals(180 * second + second / 2, session.estimatedDurationUs(window, SaveMode.LAST_WINDOW))
         val next = capture()
         val duringExport = listOf(openSegmentAppendPts) + (602..617).map { it * second / 2 }
         val videoPts = next.video.flatMap { it.packets }.map { it.ptsUs }
@@ -102,6 +151,7 @@ class ClipSaveSessionTest {
         val failed = capture()
         // 写文件抛错时不会调用 onSaved;后续重试仍从 5:00 开始。
         feed(721, 736)
+        assertEquals(68 * second, session.estimatedDurationUs(window, SaveMode.CONTINUATION))
         val retry = capture()
         assertEquals(300 * second, retry.video.first().startPtsUs)
         assertEquals(368 * second, retry.endPtsUs)
@@ -136,6 +186,7 @@ class ClipSaveSessionTest {
         rebuiltVideo.onPacket(EncodedPacket(byteArrayOf(3), 10 * second, true))
         rebuiltVideo.onPacket(EncodedPacket(byteArrayOf(4), 11 * second, true))
         rebuilt.onSaved(exporting)
+        assertEquals(second, rebuilt.estimatedDurationUs(window, SaveMode.CONTINUATION))
         val first = rebuilt.snapshot(window, SaveMode.CONTINUATION)!!
         assertEquals(10 * second, first.video.first().startPtsUs)
         rebuilt.onSaved(first)
@@ -156,6 +207,7 @@ class ClipSaveSessionTest {
         freshVideo.onPacket(EncodedPacket(byteArrayOf(1), 0, true))
         freshVideo.onPacket(EncodedPacket(byteArrayOf(2), second, true))
         fresh.onSaved(old)
+        assertEquals(second, fresh.estimatedDurationUs(window, SaveMode.CONTINUATION))
         val first = fresh.snapshot(window, SaveMode.CONTINUATION)!!
         assertEquals(0L, first.video.first().startPtsUs)
         assertEquals(second, first.endPtsUs)

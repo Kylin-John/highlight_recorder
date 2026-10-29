@@ -22,7 +22,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import com.highlightrecorder.data.SettingsHolder
 import com.highlightrecorder.data.SaveMode
 import com.highlightrecorder.service.RecordingService
 
@@ -36,11 +35,13 @@ fun HomeScreen(
 ) {
     val state by viewModel.recordingState.collectAsState()
     val buffered by viewModel.bufferedSeconds.collectAsState()
+    val estimated by viewModel.estimatedSaveSeconds.collectAsState()
+    val settings by viewModel.settings.collectAsState()
     val perms by viewModel.permissions.collectAsState()
     val recording = state == RecordingService.State.Recording ||
         state == RecordingService.State.Saving
-    val rewind = SettingsHolder.current.rewindSeconds
-    val saveMode = SettingsHolder.current.saveMode
+    val rewind = settings.rewindSeconds
+    val saveMode = settings.saveMode
 
     Column(
         modifier = Modifier
@@ -93,10 +94,17 @@ fun HomeScreen(
                 )
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    if (recording) "已缓冲 $buffered 秒 / 最多回录 $rewind 秒"
+                    if (recording) "已缓存 $buffered 秒 / 最多回录 $rewind 秒"
                     else "开始后将在后台持续缓冲最近 $rewind 秒",
                     style = MaterialTheme.typography.bodySmall,
                 )
+                if (recording) {
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "现在点击保存，预计生成 $estimated 秒视频",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
             }
         }
 

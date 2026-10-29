@@ -154,6 +154,13 @@ class CapturePipeline(
     @Synchronized
     fun onSaved(snapshot: Snapshot) = videoSession.clips.onSaved(snapshot.clip)
 
+    @Synchronized
+    fun estimatedSaveDurationUs(windowUs: Long, mode: SaveMode): Long {
+        val session = videoSession
+        if (session.format == null) return 0L
+        return session.clips.estimatedDurationUs(windowUs, mode)
+    }
+
     fun requestKeyFrame() = encoder?.requestKeyFrame()
 
     /** 运行中调整码率(降级用)。 */

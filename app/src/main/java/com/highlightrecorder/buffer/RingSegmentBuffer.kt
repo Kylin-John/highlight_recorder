@@ -45,6 +45,13 @@ class RingSegmentBuffer(
 
     val segmentCount: Int get() = synchronized(lock) { segments.size }
 
+    /** 只读分片起尾元数据,不创建快照或复制编码包列表。 */
+    fun estimatedDurationUs(windowUs: Long, fromPtsUs: Long? = null): Long = synchronized(lock) {
+        val newestEnd = (openSegment ?: segments.peekLast())?.endPtsUs ?: return@synchronized 0L
+        val start = snapshotStartLocked(newestEnd, windowUs, fromPtsUs) ?: return@synchronized 0L
+        (newestEnd - start.startPtsUs).coerceAtLeast(0L)
+    }
+
     fun onPacket(packet: EncodedPacket) {
         synchronized(lock) {
             if (packet.isKeyFrame) {
@@ -85,14 +92,29 @@ class RingSegmentBuffer(
         openSegment?.takeIf { it.packets.isNotEmpty() }?.let { all.add(it) }
         if (all.isEmpty()) return@synchronized emptyList()
 
-        val newestEnd = all.last().endPtsUs
-        if (fromPtsUs != null && newestEnd <= fromPtsUs) return@synchronized emptyList()
-        val cutoff = maxOf(newestEnd - windowUs, fromPtsUs ?: Long.MIN_VALUE)
-        // 不能只按 endPtsUs 选段:截止点落在两帧之间时会跳过仍需解码的前一个 IDR。
-        var idx = all.indexOfLast { it.startPtsUs <= cutoff && it.packets.first().isKeyFrame }
-        if (idx < 0) idx = all.indexOfFirst { it.packets.first().isKeyFrame }
-        if (idx < 0) return@synchronized emptyList()
+        val start = snapshotStartLocked(all.last().endPtsUs, windowUs, fromPtsUs)
+            ?: return@synchronized emptyList()
+        val idx = all.indexOf(start)
         all.subList(idx, all.size).map { it.snapshot() }
+    }
+
+    /** 预计时长与实际快照共用起点选择,包含逐出与非 IDR 强制切段后的实际可用范围。 */
+    private fun snapshotStartLocked(newestEnd: Long, windowUs: Long, fromPtsUs: Long?): VideoSegment? {
+        if (fromPtsUs != null && newestEnd <= fromPtsUs) return null
+        val cutoff = maxOf(newestEnd - windowUs, fromPtsUs ?: Long.MIN_VALUE)
+        var firstIdr: VideoSegment? = null
+        var start: VideoSegment? = null
+        for (segment in segments) {
+            if (!segment.packets.first().isKeyFrame) continue
+            if (firstIdr == null) firstIdr = segment
+            // 截止点在两帧之间时仍向前找 IDR,避免漏掉期间画面。
+            if (segment.startPtsUs <= cutoff) start = segment
+        }
+        openSegment?.takeIf { it.packets.firstOrNull()?.isKeyFrame == true }?.let {
+            if (firstIdr == null) firstIdr = it
+            if (it.startPtsUs <= cutoff) start = it
+        }
+        return start ?: firstIdr
     }
 
     fun clear() = synchronized(lock) {

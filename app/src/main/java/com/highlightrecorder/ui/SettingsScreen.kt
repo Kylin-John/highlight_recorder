@@ -31,6 +31,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.highlightrecorder.data.AudioSource
+import com.highlightrecorder.data.OverlayLongPressAction
 import com.highlightrecorder.data.SaveMode
 import com.highlightrecorder.data.needsMic
 import kotlin.math.roundToInt
@@ -194,6 +195,25 @@ fun SettingsScreen(viewModel: MainViewModel, onBack: () -> Unit) {
         }
 
         // ---- 悬浮窗 ----
+        Section("浮窗长按行为") {
+            // 纵向排列,避免小屏幕下两个长选项挤在同一行。
+            listOf(
+                OverlayLongPressAction.STOP to "直接停止录制",
+                OverlayLongPressAction.SAVE_AND_STOP to "保存后停止录制",
+            ).forEach { (action, label) ->
+                FilterChip(
+                    selected = settings.overlayLongPressAction == action,
+                    onClick = { viewModel.updateSettings { it.copy(overlayLongPressAction = action) } },
+                    label = { Text(label) },
+                )
+            }
+            Text(
+                "保存后停止会使用当前保存模式;保存失败继续录制。" +
+                    "已有导出时请等待完成后再次长按。主页和通知栏的停止仍直接停止录制。",
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+
         Section("悬浮窗外观") {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {

@@ -9,13 +9,15 @@ Android「游戏高光回录」App,类似一加游戏相机:后台持续循环�
 
 > 宣传页:https://owen88ob.github.io/highlight-recorder/
 
-本 Fork 当前版本为 **v1.2.3.1**：[下载 app-debug.apk](https://github.com/Kylin-John/highlight_recorder/releases/download/v1.2.3.1/app-debug.apk)。
+本 Fork 当前版本为 **v1.2.3.2**：[下载 app-debug.apk](https://github.com/Kylin-John/highlight_recorder/releases/download/v1.2.3.2/app-debug.apk)。
 
 ## 功能
 
-- 悬浮球全局可用:单击 = 按所选模式保存回放;长按 = 停止录制(未录制时拉起 App 开始)。
+- 悬浮球全局可用:单击 = 按所选模式保存回放;长按默认直接停止录制,
+  可设置为保存成功后停止(未录制时拉起 App 开始)。
 - 保存模式:默认每次保存最近 N 秒;可选「接续保存」,从上次成功保存处接续,
   最多回退 N 秒(仍为 15–300s),按关键帧对齐,允许少量重叠。
+- 主页保留「已缓存」总量,另显示现在点击保存的预计视频秒数,随当前模式与实际保留范围更新。
 - 环形回录:MediaProjection + VirtualDisplay → MediaCodec 硬件编码(H.264/H.265),
   按关键帧切 1 秒分片,只保留最近 N+2 秒,保存时从 IDR 边界拼接,无花屏。
 - 音频:内录(AudioPlaybackCapture,Android 10+)/ 麦克风 / **内录+麦克风实时混音**(PCM 相加截幅,单音轨输出)/ 静音;麦克风自动兼容单声道设备。
@@ -38,8 +40,8 @@ bash ./gradlew testDebugUnitTest    # 环形缓冲 / PTS 重定基单元测试
 ```
 
 本功能分支的 debug 包为「高光回录·接续测试」,包名增加 `.continuationtest`,
-版本为 `1.2.3.1`(versionCode 11),不追加测试版本后缀。
-本次发布附件沿用该 debug 构建及签名,用于更新此前的接续测试包,也可与原版并存。
+版本为 `1.2.3.2`(versionCode 12),不追加测试版本后缀。
+发布附件沿用既有 debug 构建及签名,用于更新此前的接续测试包,也可与原版并存。
 首次安装需单独授权与设置,使用时只开启一个录制服务。
 
 SDK 路径在 `local.properties`(本仓库使用项目内 `.android-sdk/`,已在 .gitignore 排除)。
@@ -53,7 +55,7 @@ SDK 路径在 `local.properties`(本仓库使用项目内 `.android-sdk/`,已在
 3. 切到游戏,正常游玩——App 在后台持续缓冲最近 N 秒。
 4. 打出高光后,**单击悬浮球**(或通知栏「保存回放」),几秒后 Toast 提示保存成功。
 5. 回 App「视频库」查看 / 播放 / 分享;文件在 `Movies/高光回录/`。
-6. 长按悬浮球或主页「停止录制」结束循环录制。
+6. 长按悬浮球按设置直接停止或保存后停止;主页「停止录制」直接结束循环录制。
 
 ### 接续保存
 
@@ -66,6 +68,18 @@ SDK 路径在 `local.properties`(本仓库使用项目内 `.android-sdk/`,已在
 保存失败不推进边界;正在保存时暂不接受新请求,悬浮球/通知栏重复点击会提示稍后再试。
 新录制或屏幕旋转、看门狗恢复导致编码器重建后,按新缓冲重新开始,第一次保存仍取当前窗口。
 视频从实际关键帧开始,片段之间可能有少量重叠,不保证精确到点击的那一帧。
+
+### 预计保存时长与浮窗长按
+
+主页的「已缓存」表示当前环形缓冲总量;「现在点击保存，预计生成 X 秒视频」表示当前模式下的预计成片时长。
+预计值按实际可解码分片起尾计算,不创建导出快照或复制视频载荷,与现有计时一起刷新。
+接续保存成功后,预计值仍包含点击快照截止以来继续采集且仍在窗口内的内容;失败不推进边界。
+默认窗口模式仍重复保留最近窗口。关键帧对齐与最后一帧时长可能造成少量偏差。
+
+设置页「浮窗长按行为」可选择「直接停止录制」或「保存后停止录制」,重开应用后保留选择。
+旧配置默认直接停止;保存后停止使用当前保存模式,只在文件实际保存成功后停止。
+失败或暂无新画面时继续录制并提示;已有导出时提示等待完成后再次长按,不并发导出或自动排队。
+主页与通知栏的「停止」仍直接停止录制。
 
 ## 权限说明
 
@@ -91,7 +105,8 @@ SDK 路径在 `local.properties`(本仓库使用项目内 `.android-sdk/`,已在
 - **零原始帧**:VirtualDisplay 直送编码器 inputSurface,全程无 Bitmap/帧拷贝。
 - 单元测试:`RingSegmentBufferTest`(逐出/稳定快照/IDR 对齐)、`AudioRingBufferTest`、
   `PtsRebaserTest`(重定基单调性、音视频裁剪)、`ClipSaveSessionTest`(接续/失败/会话隔离)、
-  `RecordingSettingsTest`(保存模式兼容默认值)。
+  `RecordingSettingsTest`/`SettingsRepositoryTest`(设置默认值与持久化映射)、
+  `RecordingSaveSessionTest`(异步保存成功后停止/失败重试/并发拒绝/停止重开隔离)。
 
 ## 已知限制
 

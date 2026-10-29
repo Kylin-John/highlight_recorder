@@ -127,6 +127,17 @@ class RingSegmentBufferTest {
     }
 
     @Test
+    fun `强制切段后唯一 IDR 被逐出时预计时长为零`() {
+        val buf = RingSegmentBuffer(capacityUs = 5_000_000)
+        buf.onPacket(EncodedPacket(byteArrayOf(1), 0, true))
+        buf.onPacket(EncodedPacket(byteArrayOf(1), 4_100_000))
+        buf.onPacket(EncodedPacket(byteArrayOf(1), 8_200_000))
+        assertTrue(buf.bufferedDurationUs > 0L)
+        assertTrue(buf.snapshot(30_000_000).isEmpty())
+        assertEquals(0L, buf.estimatedDurationUs(30_000_000))
+    }
+
+    @Test
     fun `编码器不发关键帧时分片超时回调`() {
         val buf = RingSegmentBuffer(capacityUs = 60_000_000)
         var overruns = 0
@@ -165,5 +176,7 @@ class RingSegmentBufferTest {
         assertTrue("字节 ${buf.bufferedBytes}", buf.bufferedBytes <= 10_000 + 3_000)
         assertTrue("应触发字节安全阀回调", evictions >= 1)
         assertTrue("至少保留一个分片", buf.segmentCount >= 1)
+        val snap = buf.snapshot(600_000_000)
+        assertEquals(snap.last().endPtsUs - snap.first().startPtsUs, buf.estimatedDurationUs(600_000_000))
     }
 }

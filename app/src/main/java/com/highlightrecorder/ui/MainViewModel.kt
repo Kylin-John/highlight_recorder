@@ -55,6 +55,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     val recordingState = RecordingService.state
     val bufferedSeconds = RecordingService.bufferedSeconds
+    val estimatedSaveSeconds = RecordingService.estimatedSaveSeconds
     val savedEvents = RecordingService.savedEvents
 
     /** 首次启动是否已完成引导。 */

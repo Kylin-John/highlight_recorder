@@ -20,6 +20,8 @@ data class RecordingSettings(
     val overlayEdgeHide: Boolean = false,
     /** 彻底隐藏悬浮球(录制仍继续,从 App 设置恢复)。 */
     val overlayHidden: Boolean = false,
+    /** 缺省沿用长按浮窗直接停止录制。 */
+    val overlayLongPressAction: OverlayLongPressAction = OverlayLongPressAction.STOP,
     /** 回收站自动清理天数。 */
     val trashAutoDeleteDays: Int = 30,
 )
@@ -32,6 +34,15 @@ enum class SaveMode {
     companion object {
         fun fromPreference(value: String?): SaveMode =
             entries.firstOrNull { it.name == value } ?: LAST_WINDOW
+    }
+}
+
+enum class OverlayLongPressAction {
+    STOP, SAVE_AND_STOP;
+
+    companion object {
+        fun fromPreference(value: String?): OverlayLongPressAction =
+            entries.firstOrNull { it.name == value } ?: STOP
     }
 }
 
