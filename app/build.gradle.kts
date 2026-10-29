@@ -12,8 +12,8 @@ android {
         applicationId = "com.highlightrecorder"
         minSdk = 26
         targetSdk = 35
-        versionCode = 10
-        versionName = "1.2.3"
+        versionCode = 11
+        versionName = "1.2.3.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -22,7 +22,6 @@ android {
         debug {
             isMinifyEnabled = false
             applicationIdSuffix = ".continuationtest"
-            versionNameSuffix = "-continuation-test.1"
             resValue("string", "app_name", "高光回录·接续测试")
         }
         release {

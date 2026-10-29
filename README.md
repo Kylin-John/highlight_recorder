@@ -9,6 +9,8 @@ Android「游戏高光回录」App,类似一加游戏相机:后台持续循环�
 
 > 宣传页:https://owen88ob.github.io/highlight-recorder/
 
+本 Fork 当前版本为 **v1.2.3.1**：[下载 app-debug.apk](https://github.com/Kylin-John/highlight_recorder/releases/download/v1.2.3.1/app-debug.apk)。
+
 ## 功能
 
 - 悬浮球全局可用:单击 = 按所选模式保存回放;长按 = 停止录制(未录制时拉起 App 开始)。
@@ -31,13 +33,14 @@ Android「游戏高光回录」App,类似一加游戏相机:后台持续循环�
 环境:JDK 17+(开发用 21),Gradle Wrapper 自带。
 
 ```bash
-./gradlew assembleDebug        # 产出 app/build/outputs/apk/debug/app-debug.apk
-./gradlew testDebugUnitTest    # 环形缓冲 / PTS 重定基单元测试
+bash ./gradlew assembleDebug        # 产出 app/build/outputs/apk/debug/app-debug.apk
+bash ./gradlew testDebugUnitTest    # 环形缓冲 / PTS 重定基单元测试
 ```
 
 本功能分支的 debug 包为「高光回录·接续测试」,包名增加 `.continuationtest`,
-版本带 `-continuation-test.1`,供与原版并存实测;release 配置不变。
-测试版需单独授权与设置,测试时只开启一个录制服务。
+版本为 `1.2.3.1`(versionCode 11),不追加测试版本后缀。
+本次发布附件沿用该 debug 构建及签名,用于更新此前的接续测试包,也可与原版并存。
+首次安装需单独授权与设置,使用时只开启一个录制服务。
 
 SDK 路径在 `local.properties`(本仓库使用项目内 `.android-sdk/`,已在 .gitignore 排除)。
 在自己机器上构建:改成你的 SDK 路径或用 Android Studio 打开自动生成。
