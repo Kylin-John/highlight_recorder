@@ -32,4 +32,17 @@ class AudioRingBufferTest {
         assertTrue(snap.all { it.ptsUs >= 3_000_000 })
         assertTrue(snap.last().ptsUs - snap.first().ptsUs <= 2_000_000)
     }
+
+    @Test
+    fun `按视频尾部截断且快照不随追加或清空改变`() {
+        val buf = AudioRingBuffer(10_000_000)
+        feed(buf, seconds = 5)
+        val snap = buf.snapshot(fromPtsUs = 2_000_000, toPtsUs = 3_000_000)
+        val pts = snap.map { it.ptsUs }
+        feed(buf, seconds = 2, startPtsUs = 5_000_000)
+        buf.clear()
+        assertTrue(snap.isNotEmpty())
+        assertTrue(snap.all { it.ptsUs in 2_000_000L..3_000_000L })
+        assertEquals(pts, snap.map { it.ptsUs })
+    }
 }

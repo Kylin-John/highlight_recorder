@@ -12,12 +12,13 @@ import android.util.Log
 import android.view.Display
 import android.view.Surface
 import com.highlightrecorder.buffer.AudioRingBuffer
+import com.highlightrecorder.buffer.ClipSaveSession
 import com.highlightrecorder.buffer.EncodedPacket
 import com.highlightrecorder.buffer.RingSegmentBuffer
-import com.highlightrecorder.buffer.VideoSegment
 import com.highlightrecorder.data.AudioSource
 import com.highlightrecorder.data.FileLogger
 import com.highlightrecorder.data.RecordingSettings
+import com.highlightrecorder.data.SaveMode
 
 /**
  * 采集管线:MediaProjection → VirtualDisplay → VideoEncoder → 环形缓冲。
@@ -48,27 +49,37 @@ class CapturePipeline(
 
     var listener: Listener? = null
 
-    val videoBuffer = RingSegmentBuffer(
-        capacityUs = (settings.rewindSeconds + SLACK_SECONDS) * 1_000_000L,
-        // 字节安全阀按码率动态计算:预估(码率×保留时长)的 1.5 倍,保底 300MB、封顶 768MB。
-        // 固定 300MB 在 2K@120fps 高码率下会被 VBR 峰值触发,把 60s 回退截短成 40~50s。
-        maxBytes = minOf(
-            768L * 1024 * 1024,
-            maxOf(
-                300L * 1024 * 1024,
-                settings.videoBitrateBps / 8L * (settings.rewindSeconds + SLACK_SECONDS) * 3 / 2,
-            ),
-        ).toInt(),
-    ).apply {
-        onByteBudgetEvict = { total ->
-            FileLogger.log(TAG, "byte budget evict: buffer=${total / 1024 / 1024}MB, VBR 峰值超预估,回退时长被临时缩短")
-        }
-    }
     val audioBuffer = AudioRingBuffer((settings.rewindSeconds + SLACK_SECONDS) * 1_000_000L)
 
+    private class VideoSession(val clips: ClipSaveSession) {
+        @Volatile
+        var format: MediaFormat? = null
+    }
+
     @Volatile
-    var videoFormat: MediaFormat? = null
-        private set
+    private var videoSession = newVideoSession()
+
+    val videoBuffer: RingSegmentBuffer get() = videoSession.clips.videoBuffer
+
+    private fun newVideoSession(): VideoSession {
+        val buffer = RingSegmentBuffer(
+            capacityUs = (settings.rewindSeconds + SLACK_SECONDS) * 1_000_000L,
+            // 字节安全阀按码率动态计算:预估(码率×保留时长)的 1.5 倍,保底 300MB、封顶 768MB。
+            // 固定 300MB 在 2K@120fps 高码率下会被 VBR 峰值触发,把 60s 回退截短成 40~50s。
+            maxBytes = minOf(
+                768L * 1024 * 1024,
+                maxOf(
+                    300L * 1024 * 1024,
+                    settings.videoBitrateBps / 8L * (settings.rewindSeconds + SLACK_SECONDS) * 3 / 2,
+                ),
+            ).toInt(),
+        ).apply {
+            onByteBudgetEvict = { total ->
+                FileLogger.log(TAG, "byte budget evict: buffer=${total / 1024 / 1024}MB, VBR 峰值超预估,回退时长被临时缩短")
+            }
+        }
+        return VideoSession(ClipSaveSession(buffer, audioBuffer))
+    }
 
     @Volatile
     var audioFormat: MediaFormat? = null
@@ -125,9 +136,23 @@ class CapturePipeline(
         FileLogger.log(TAG, "pipeline started audio=${settings.audioSource} size=${currentWidth}x$currentHeight rotation=$lastRotation")
     }
 
-    /** 取最近 [windowUs] 的视频分片与对齐音频帧快照。 */
-    fun snapshot(windowUs: Long): Pair<List<VideoSegment>, List<EncodedPacket>> =
-        videoBuffer.snapshot(windowUs) to audioBuffer.snapshot(0L)
+    class Snapshot(
+        val clip: ClipSaveSession.Snapshot,
+        val videoFormat: MediaFormat,
+        val audioFormat: MediaFormat?,
+    )
+
+    /** 快照、格式和保存边界属于同一编码器生命周期。 */
+    @Synchronized
+    fun snapshot(windowUs: Long, mode: SaveMode): Snapshot? {
+        val session = videoSession
+        val format = session.format ?: return null
+        val clip = session.clips.snapshot(windowUs, mode) ?: return null
+        return Snapshot(clip, format, audioFormat)
+    }
+
+    @Synchronized
+    fun onSaved(snapshot: Snapshot) = videoSession.clips.onSaved(snapshot.clip)
 
     fun requestKeyFrame() = encoder?.requestKeyFrame()
 
@@ -169,8 +194,8 @@ class CapturePipeline(
         FileLogger.log(TAG, "restartEncoder begin")
         encoder?.stop()
         encoder = null
-        videoBuffer.clear()
-        videoFormat = null
+        // 老编码器的迟到回调仍只持有老缓冲,不会混入新格式或推进新边界。
+        videoSession = newVideoSession()
         try {
             val enc = createEncoder()
             encoder = enc
@@ -194,6 +219,7 @@ class CapturePipeline(
 
     /** 创建并启动视频编码器(尺寸按当前旋转与编码器能力解析)。 */
     private fun createEncoder(): VideoEncoder {
+        val session = videoSession
         val (w, h) = resolveSize()
         currentWidth = w
         currentHeight = h
@@ -206,23 +232,26 @@ class CapturePipeline(
         )
         enc.listener = object : VideoEncoder.Listener {
             override fun onPacket(packet: EncodedPacket) {
+                if (videoSession !== session) return
                 lastVideoPacketNs = System.nanoTime()
-                videoBuffer.onPacket(packet)
+                session.clips.videoBuffer.onPacket(packet)
             }
 
             override fun onOutputFormat(format: MediaFormat) {
-                videoFormat = format
+                session.format = format
+                if (videoSession !== session) return
                 listener?.onVideoFormat(format)
             }
 
             override fun onError(t: Throwable) {
+                if (videoSession !== session) return
                 Log.e(TAG, "video encoder error", t)
                 listener?.onError(t)
             }
         }
         enc.start()
         // 编码器不发周期 IDR 时,缓冲请求强制关键帧
-        videoBuffer.onSegmentOverrun = { enc.requestKeyFrame() }
+        session.clips.videoBuffer.onSegmentOverrun = { enc.requestKeyFrame() }
         return enc
     }
 
@@ -267,6 +296,7 @@ class CapturePipeline(
         }
     }
 
+    @Synchronized
     fun stop() {
         if (!running) return
         running = false
@@ -284,7 +314,7 @@ class CapturePipeline(
         encoder = null
         audioEncoder?.stop()
         audioEncoder = null
-        videoBuffer.clear()
+        videoSession = newVideoSession()
         audioBuffer.clear()
         FileLogger.log(TAG, "pipeline stopped")
     }

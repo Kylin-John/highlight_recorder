@@ -20,6 +20,7 @@ import com.highlightrecorder.data.FileLogger
 import com.highlightrecorder.data.SettingsHolder
 import com.highlightrecorder.data.needsMic
 import com.highlightrecorder.overlay.OverlayManager
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -30,6 +31,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * 前台录制服务:持有 MediaProjection 与采集管线。
@@ -243,50 +245,44 @@ class RecordingService : Service() {
         stopSelf()
     }
 
-    /** 保存最近 N 秒。快照只拷引用,编码与录制全程不中断。 */
+    /** 保存点击时固定的媒体范围,编码与录制全程不中断。 */
     private fun saveClip() {
         val p = pipeline ?: run {
             Log.w(TAG, "save ignored: not recording")
             return
         }
         val settings = SettingsHolder.current
-        val videoFormat = p.videoFormat ?: run {
-            Log.w(TAG, "save ignored: no video format yet")
+        if (state.value == State.Saving) {
+            android.widget.Toast.makeText(this, "正在保存,请稍候再试;录制仍在继续", android.widget.Toast.LENGTH_SHORT).show()
             return
         }
-        if (state.value == State.Saving) return
+        val snapshot = p.snapshot(settings.rewindSeconds * 1_000_000L, settings.saveMode) ?: run {
+            Log.w(TAG, "save ignored: no new decodable video")
+            android.widget.Toast.makeText(this, "缓冲中暂无新的可保存画面,请稍后再试", android.widget.Toast.LENGTH_SHORT).show()
+            return
+        }
         state.value = State.Saving
 
-        val (video, audio) = p.snapshot(settings.rewindSeconds * 1_000_000L)
-        val audioFormat = p.audioFormat
-
-        scope.launch(Dispatchers.IO) {
+        scope.launch {
             try {
-                if (video.isEmpty()) {
-                    // 缓冲为空也要给用户明确反馈(此前静默返回,用户以为按钮坏了)
-                    Log.w(TAG, "buffer empty, nothing to save")
-                    FileLogger.log(TAG, "save ignored: video buffer empty")
-                    updateNotification("缓冲为空,无法保存(录制可能已中断)")
-                    scope.launch(Dispatchers.Main) {
-                        android.widget.Toast.makeText(
-                            this@RecordingService,
-                            "缓冲为空,无法保存,请留意通知栏录制状态",
-                            android.widget.Toast.LENGTH_LONG,
-                        ).show()
-                    }
-                    return@launch
+                val result = withContext(Dispatchers.IO) {
+                    ClipWriter.write(
+                        this@RecordingService, snapshot.clip.video, snapshot.clip.audio, snapshot.videoFormat,
+                        if (snapshot.clip.audio.isEmpty()) null else snapshot.audioFormat,
+                    )
                 }
-                val result = ClipWriter.write(
-                    this@RecordingService, video, audio, videoFormat,
-                    if (audio.isEmpty()) null else audioFormat,
-                )
+                // 停止后又开始录制时,旧任务不能改新会话的状态或通知。
+                if (pipeline !== p) return@launch
+                p.onSaved(snapshot)
                 savedEvents.tryEmit(SavedEvent(result.uri.toString(), result.durationMs))
                 updateNotification("已保存 %.1f 秒高光".format(result.durationMs / 1000f))
+            } catch (t: CancellationException) {
+                throw t
             } catch (t: Throwable) {
                 Log.e(TAG, "save failed", t)
-                updateNotification("保存失败: ${t.message}")
+                if (pipeline === p) updateNotification("保存失败: ${t.message}")
             } finally {
-                if (pipeline != null) state.value = State.Recording
+                if (pipeline === p && state.value == State.Saving) state.value = State.Recording
             }
         }
     }

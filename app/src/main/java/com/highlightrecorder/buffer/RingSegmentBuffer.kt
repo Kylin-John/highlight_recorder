@@ -48,7 +48,7 @@ class RingSegmentBuffer(
     fun onPacket(packet: EncodedPacket) {
         synchronized(lock) {
             if (packet.isKeyFrame) {
-                openSegment?.let { segments.addLast(it) }
+                openSegment?.let { segments.addLast(it.seal()) }
                 openSegment = VideoSegment(packet.ptsUs)
                 evictLocked()
             } else if (openSegment == null) {
@@ -59,7 +59,7 @@ class RingSegmentBuffer(
                 val span = packet.ptsUs - seg.startPtsUs
                 if (span > hardSegmentUs) {
                     // 编码器迟迟不发 IDR:强制切段兜底,否则内存无限增长
-                    segments.addLast(seg)
+                    segments.addLast(seg.seal())
                     openSegment = VideoSegment(packet.ptsUs)
                     evictLocked()
                 } else if (span > softSegmentUs &&
@@ -77,17 +77,22 @@ class RingSegmentBuffer(
 
     /**
      * 取最近 [windowUs] 微秒的分片快照(含正在写入的开放分片)。
-     * 返回的列表按时间升序,首分片以 IDR 开头。
+     * [fromPtsUs] 为上次成功保存的媒体尾部,起点向前对齐实际 IDR,允许少量重叠。
+     * 返回的分片与包列表不再变化,编码载荷不复制。
      */
-    fun snapshot(windowUs: Long): List<VideoSegment> = synchronized(lock) {
+    fun snapshot(windowUs: Long, fromPtsUs: Long? = null): List<VideoSegment> = synchronized(lock) {
         val all = segments.toMutableList()
         openSegment?.takeIf { it.packets.isNotEmpty() }?.let { all.add(it) }
         if (all.isEmpty()) return@synchronized emptyList()
 
         val newestEnd = all.last().endPtsUs
-        val cutoff = newestEnd - windowUs
-        val idx = all.indexOfFirst { it.endPtsUs >= cutoff }
-        all.subList(if (idx < 0) 0 else idx, all.size).toList()
+        if (fromPtsUs != null && newestEnd <= fromPtsUs) return@synchronized emptyList()
+        val cutoff = maxOf(newestEnd - windowUs, fromPtsUs ?: Long.MIN_VALUE)
+        // 不能只按 endPtsUs 选段:截止点落在两帧之间时会跳过仍需解码的前一个 IDR。
+        var idx = all.indexOfLast { it.startPtsUs <= cutoff && it.packets.first().isKeyFrame }
+        if (idx < 0) idx = all.indexOfFirst { it.packets.first().isKeyFrame }
+        if (idx < 0) return@synchronized emptyList()
+        all.subList(idx, all.size).map { it.snapshot() }
     }
 
     fun clear() = synchronized(lock) {

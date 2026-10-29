@@ -4,6 +4,8 @@ package com.highlightrecorder.data
 data class RecordingSettings(
     /** 回退时长(秒)。 */
     val rewindSeconds: Int = 30,
+    /** 缺省沿用每次保存最近 N 秒的行为。 */
+    val saveMode: SaveMode = SaveMode.LAST_WINDOW,
     /** 0=跟随屏幕, 720/1080=短边像素。 */
     val resolutionShortEdge: Int = 720,
     val frameRate: Int = 30,
@@ -23,6 +25,15 @@ data class RecordingSettings(
 )
 
 enum class AudioSource { INTERNAL, MIC, INTERNAL_AND_MIC, MUTE }
+
+enum class SaveMode {
+    LAST_WINDOW, CONTINUATION;
+
+    companion object {
+        fun fromPreference(value: String?): SaveMode =
+            entries.firstOrNull { it.name == value } ?: LAST_WINDOW
+    }
+}
 
 /** 该音源是否需要麦克风权限/前台服务 microphone 类型。 */
 fun AudioSource.needsMic(): Boolean = this == AudioSource.MIC || this == AudioSource.INTERNAL_AND_MIC

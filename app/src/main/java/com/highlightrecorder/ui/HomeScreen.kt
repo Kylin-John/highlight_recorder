@@ -23,6 +23,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.highlightrecorder.data.SettingsHolder
+import com.highlightrecorder.data.SaveMode
 import com.highlightrecorder.service.RecordingService
 
 @Composable
@@ -39,6 +40,7 @@ fun HomeScreen(
     val recording = state == RecordingService.State.Recording ||
         state == RecordingService.State.Saving
     val rewind = SettingsHolder.current.rewindSeconds
+    val saveMode = SettingsHolder.current.saveMode
 
     Column(
         modifier = Modifier
@@ -117,10 +119,10 @@ fun HomeScreen(
 
         OutlinedButton(
             onClick = { viewModel.requestSave() },
-            enabled = recording,
+            enabled = state == RecordingService.State.Recording,
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Text("立即保存最近 $rewind 秒")
+            Text(if (saveMode == SaveMode.CONTINUATION) "接续保存(最多 $rewind 秒)" else "立即保存最近 $rewind 秒")
         }
 
         Text(

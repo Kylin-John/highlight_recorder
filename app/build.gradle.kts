@@ -21,6 +21,9 @@ android {
     buildTypes {
         debug {
             isMinifyEnabled = false
+            applicationIdSuffix = ".continuationtest"
+            versionNameSuffix = "-continuation-test.1"
+            resValue("string", "app_name", "高光回录·接续测试")
         }
         release {
             isMinifyEnabled = false

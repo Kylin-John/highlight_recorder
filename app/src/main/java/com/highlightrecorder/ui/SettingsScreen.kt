@@ -31,6 +31,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.highlightrecorder.data.AudioSource
+import com.highlightrecorder.data.SaveMode
 import com.highlightrecorder.data.needsMic
 import kotlin.math.roundToInt
 
@@ -74,6 +75,22 @@ fun SettingsScreen(viewModel: MainViewModel, onBack: () -> Unit) {
             val memMb = settings.videoBitrateBps / 8L * (settings.rewindSeconds + 2) / 1_000_000
             val valveMb = minOf(768, maxOf(300, memMb * 3 / 2))
             Text("缓冲内存预估: 约 ${memMb} MB(码率 × 时长;激烈场景码率冲高,超过 ${valveMb}MB 安全阀将自动缩短实际缓冲时长)", style = MaterialTheme.typography.bodySmall)
+        }
+
+        // ---- 保存模式 ----
+        Section("保存模式") {
+            ChipRow(
+                options = listOf(
+                    SaveMode.LAST_WINDOW to "每次保存最近 N 秒",
+                    SaveMode.CONTINUATION to "接续保存",
+                ),
+                selected = settings.saveMode,
+            ) { v -> viewModel.updateSettings { it.copy(saveMode = v) } }
+            Text(
+                "接续保存从上次成功保存处继续,最多保留设定的回退时长;" +
+                    "关键帧附近可能少量重叠。导出期间继续录制,保存失败可重试。",
+                style = MaterialTheme.typography.bodySmall,
+            )
         }
 
         // ---- 分辨率 ----

@@ -19,6 +19,7 @@ class SettingsRepository(private val context: Context) {
 
     private object Keys {
         val REWIND = intPreferencesKey("rewind_seconds")
+        val SAVE_MODE = stringPreferencesKey("save_mode")
         val RESOLUTION = intPreferencesKey("resolution_short_edge")
         val FPS = intPreferencesKey("frame_rate")
         val BITRATE = intPreferencesKey("video_bitrate_bps")
@@ -33,6 +34,7 @@ class SettingsRepository(private val context: Context) {
 
     private fun fromPrefs(p: Preferences) = RecordingSettings(
         rewindSeconds = p[Keys.REWIND] ?: 30,
+        saveMode = SaveMode.fromPreference(p[Keys.SAVE_MODE]),
         resolutionShortEdge = p[Keys.RESOLUTION] ?: 720,
         frameRate = p[Keys.FPS] ?: 30,
         videoBitrateBps = p[Keys.BITRATE] ?: 8_000_000,
@@ -49,6 +51,7 @@ class SettingsRepository(private val context: Context) {
 
     private fun writeTo(p: MutablePreferences, s: RecordingSettings) {
         p[Keys.REWIND] = s.rewindSeconds
+        p[Keys.SAVE_MODE] = s.saveMode.name
         p[Keys.RESOLUTION] = s.resolutionShortEdge
         p[Keys.FPS] = s.frameRate
         p[Keys.BITRATE] = s.videoBitrateBps

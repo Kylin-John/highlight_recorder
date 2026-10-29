@@ -108,21 +108,24 @@ object ClipWriter {
                 }
             }
             muxer.stop()
-            ok = true
 
             val last = videoPackets.last()
             val durationMs = last.ptsUs / 1000
 
             if (pendingUri != null && Build.VERSION.SDK_INT >= 29) {
                 val done = ContentValues().apply { put(MediaStore.Video.Media.IS_PENDING, 0) }
-                context.contentResolver.update(pendingUri, done, null, null)
+                check(context.contentResolver.update(pendingUri, done, null, null) > 0) {
+                    "MediaStore publish failed"
+                }
                 val size = legacyFile?.length() ?: querySize(context, pendingUri)
                 Log.i(TAG, "clip saved: $pendingUri ${durationMs}ms")
+                ok = true
                 return Result(pendingUri, durationMs, size)
             }
             val file = legacyFile!!
             val uri = Uri.fromFile(file)
             Log.i(TAG, "clip saved: $file ${durationMs}ms")
+            ok = true
             return Result(uri, durationMs, file.length())
         } finally {
             try {

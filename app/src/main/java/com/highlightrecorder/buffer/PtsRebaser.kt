@@ -22,7 +22,8 @@ object PtsRebaser {
         // 与 rebaseVideo 同一基准:首个关键帧的 PTS
         val all = videoSegments.flatMap { it.packets }.sortedBy { it.ptsUs }
         val base = all.firstOrNull { it.isKeyFrame }?.ptsUs ?: return emptyList()
-        return audio.filter { it.ptsUs >= base }
+        val end = all.last().ptsUs
+        return audio.filter { it.ptsUs in base..end }
             .sortedBy { it.ptsUs }
             .map { EncodedPacket(it.data, it.ptsUs - base, false) }
     }
