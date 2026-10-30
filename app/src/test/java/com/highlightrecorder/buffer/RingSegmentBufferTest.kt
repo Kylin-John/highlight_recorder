@@ -1,8 +1,12 @@
 package com.highlightrecorder.buffer
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 class RingSegmentBufferTest {
 
@@ -67,9 +71,70 @@ class RingSegmentBufferTest {
     }
 
     @Test
+    fun `开放分片快照在另一线程继续追加后仍固定包列表和尾部`() {
+        val buf = RingSegmentBuffer(capacityUs = 5_000_000)
+        val first = EncodedPacket(ByteArray(10), 0, true)
+        buf.onPacket(first)
+        buf.onPacket(EncodedPacket(ByteArray(10), 33_333))
+        val snap = buf.snapshot(5_000_000)
+        val append = CountDownLatch(1)
+        val executor = Executors.newSingleThreadExecutor()
+        try {
+            val writer = executor.submit {
+                check(append.await(5, TimeUnit.SECONDS))
+                for (i in 2..29) {
+                    buf.onPacket(EncodedPacket(ByteArray(10), i * 33_333L))
+                }
+            }
+            append.countDown()
+            writer.get(5, TimeUnit.SECONDS)
+            assertEquals(2, snap.single().packets.size)
+            assertEquals(33_333L, snap.single().endPtsUs)
+            assertSame(first, snap.single().packets.first())
+            assertEquals(30, buf.snapshot(5_000_000).single().packets.size)
+            // 缓冲清空、逐出都不能破坏已接受的导出快照。
+            buf.clear()
+            assertEquals(2, snap.single().packets.size)
+        } finally {
+            executor.shutdownNow()
+        }
+    }
+
+    @Test
+    fun `接续边界位于两帧之间时向前取 IDR 以免漏掉期间画面`() {
+        val buf = RingSegmentBuffer(capacityUs = 10_000_000)
+        feed(buf, seconds = 3)
+        val snap = buf.snapshot(10_000_000, fromPtsUs = 990_000)
+        assertEquals(0L, snap.first().startPtsUs)
+        assertTrue(snap.flatMap { it.packets }.any { it.ptsUs == 1_000_000L })
+    }
+
+    @Test
+    fun `强制非 IDR 切段不会让快照从不可解码片段开始`() {
+        val buf = RingSegmentBuffer(capacityUs = 20_000_000)
+        buf.onPacket(EncodedPacket(ByteArray(10), 0, true))
+        buf.onPacket(EncodedPacket(ByteArray(10), 4_100_000))
+        buf.onPacket(EncodedPacket(ByteArray(10), 5_000_000, true))
+        val snap = buf.snapshot(600_000)
+        assertEquals(0L, snap.first().startPtsUs)
+        assertTrue(snap.first().packets.first().isKeyFrame)
+    }
+
+    @Test
     fun `缓冲为空时快照为空`() {
         val buf = RingSegmentBuffer(capacityUs = 10_000_000)
         assertTrue(buf.snapshot(1_000_000).isEmpty())
+    }
+
+    @Test
+    fun `强制切段后唯一 IDR 被逐出时预计时长为零`() {
+        val buf = RingSegmentBuffer(capacityUs = 5_000_000)
+        buf.onPacket(EncodedPacket(byteArrayOf(1), 0, true))
+        buf.onPacket(EncodedPacket(byteArrayOf(1), 4_100_000))
+        buf.onPacket(EncodedPacket(byteArrayOf(1), 8_200_000))
+        assertTrue(buf.bufferedDurationUs > 0L)
+        assertTrue(buf.snapshot(30_000_000).isEmpty())
+        assertEquals(0L, buf.estimatedDurationUs(30_000_000))
     }
 
     @Test
@@ -111,5 +176,7 @@ class RingSegmentBufferTest {
         assertTrue("字节 ${buf.bufferedBytes}", buf.bufferedBytes <= 10_000 + 3_000)
         assertTrue("应触发字节安全阀回调", evictions >= 1)
         assertTrue("至少保留一个分片", buf.segmentCount >= 1)
+        val snap = buf.snapshot(600_000_000)
+        assertEquals(snap.last().endPtsUs - snap.first().startPtsUs, buf.estimatedDurationUs(600_000_000))
     }
 }

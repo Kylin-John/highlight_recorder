@@ -19,6 +19,7 @@ class FloatingButtonView(context: Context) : FrameLayout(context) {
 
     private val dot: View
     private var breathing: ValueAnimator? = null
+    private val label: TextView
 
     init {
         val size = dp(56)
@@ -29,7 +30,7 @@ class FloatingButtonView(context: Context) : FrameLayout(context) {
         }
         background = bg
 
-        val label = TextView(context).apply {
+        label = TextView(context).apply {
             text = "存"
             setTextColor(Color.WHITE)
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
@@ -52,6 +53,16 @@ class FloatingButtonView(context: Context) : FrameLayout(context) {
         addView(dot, dotLp)
 
         layoutParams = ViewGroup.LayoutParams(size, size)
+    }
+
+    fun setContent(text: String, description: String) {
+        if (label.text != text) label.text = text
+        contentDescription = "$text, $description"
+    }
+
+    override fun onDetachedFromWindow() {
+        setRecording(false)
+        super.onDetachedFromWindow()
     }
 
     fun setRecording(recording: Boolean) {

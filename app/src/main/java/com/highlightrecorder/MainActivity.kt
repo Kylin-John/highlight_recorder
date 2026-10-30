@@ -13,6 +13,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -29,13 +30,22 @@ import com.highlightrecorder.ui.MainViewModel
 import com.highlightrecorder.ui.OnboardingScreen
 import com.highlightrecorder.ui.SettingsScreen
 import com.highlightrecorder.ui.TrashScreen
+import com.highlightrecorder.ui.MonitorScreen
 import com.highlightrecorder.ui.theme.HighlightRecorderTheme
 
 class MainActivity : ComponentActivity() {
+    private var openMonitor by androidx.compose.runtime.mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        openMonitor = intent.getBooleanExtra(RecordingService.EXTRA_OPEN_MONITOR, false)
         mountContent()
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (intent.getBooleanExtra(RecordingService.EXTRA_OPEN_MONITOR, false)) openMonitor = true
     }
 
     /**
@@ -65,7 +75,13 @@ class MainActivity : ComponentActivity() {
                     }
 
                     // 子页面的返回(含侧滑手势)统一回到上一级;主页/引导页返回走系统默认(退出)
-                    BackHandler(enabled = route == "settings" || route == "library" || route == "trash") {
+                    LaunchedEffect(openMonitor) {
+                        if (openMonitor) {
+                            route = "monitor"
+                            openMonitor = false
+                        }
+                    }
+                    BackHandler(enabled = route == "settings" || route == "library" || route == "trash" || route == "monitor") {
                         route = if (route == "trash") "library" else "home"
                     }
 
@@ -104,6 +120,7 @@ class MainActivity : ComponentActivity() {
                     }
 
                     when (route) {
+                        "monitor" -> MonitorScreen(vm, onBack = { route = "home" })
                         "onboarding" -> OnboardingScreen(
                             viewModel = vm,
                             onFinished = { route = "home" },
@@ -127,6 +144,7 @@ class MainActivity : ComponentActivity() {
                             onGoOnboarding = { route = "onboarding" },
                             onGoSettings = { route = "settings" },
                             onGoLibrary = { route = "library" },
+                            onGoMonitor = { route = "monitor" },
                         )
                     }
                 }

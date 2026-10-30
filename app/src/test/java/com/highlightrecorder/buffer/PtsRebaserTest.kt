@@ -42,7 +42,23 @@ class PtsRebaserTest {
         assertTrue(rebased.isNotEmpty())
         assertTrue(rebased.first().ptsUs >= 0)
         assertTrue(rebased.all { it.ptsUs >= 0 })
+        assertTrue(rebased.all { it.ptsUs <= 1_966_657L })
         assertTrue(rebased.zipWithNext().all { (a, b) -> b.ptsUs >= a.ptsUs })
+    }
+
+    @Test
+    fun `音频两端使用视频实际范围并共享载荷`() {
+        val segments = makeSegments()
+        val end = segments.last().endPtsUs
+        val audio = listOf(
+            EncodedPacket(ByteArray(10), 4_999_999),
+            EncodedPacket(ByteArray(10), 5_000_000),
+            EncodedPacket(ByteArray(10), end),
+            EncodedPacket(ByteArray(10), end + 1),
+        )
+        val rebased = PtsRebaser.rebaseAudio(audio, segments)
+        assertEquals(listOf(0L, end - 5_000_000), rebased.map { it.ptsUs })
+        org.junit.Assert.assertSame(audio[1].data, rebased.first().data)
     }
 
     @Test

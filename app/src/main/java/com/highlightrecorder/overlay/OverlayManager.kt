@@ -22,7 +22,7 @@ import kotlin.math.abs
 
 /**
  * 悬浮窗管理:显示/隐藏、拖动、松手贴边(可选半隐藏)、透明度、
- * 单击=保存回放,长按=开始/停止录制(未录制时拉起 App 走授权流程)。
+ * 单击=保存回放,长按按设置停止或保存后停止(未录制时拉起 App 走授权流程)。
  * 生命周期绑定 RecordingService:服务运行时显示,销毁时移除。
  */
 class OverlayManager(private val context: Context) {
@@ -106,7 +106,13 @@ class OverlayManager(private val context: Context) {
         button?.setRecording(recording)
     }
 
+    fun setContent(text: String, description: String) {
+        button?.setContent(text, description)
+    }
+
     fun hide() {
+        // 移除浮窗时取消未触发的长按,避免旧触摸操作落入新录制会话。
+        handler.removeCallbacksAndMessages(null)
         button?.let {
             try {
                 wm.removeView(it)
@@ -210,7 +216,14 @@ class OverlayManager(private val context: Context) {
     }
 
     private fun onClick() {
-        if (RecordingService.state.value == RecordingService.State.Recording) {
+        if (RecordingService.state.value == RecordingService.State.Monitoring) {
+            val launch = context.packageManager.getLaunchIntentForPackage(context.packageName)
+            launch?.let {
+                it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                it.putExtra(RecordingService.EXTRA_OPEN_MONITOR, true)
+                context.startActivity(it)
+            }
+        } else if (isRecording()) {
             context.startService(
                 Intent(context, RecordingService::class.java).setAction(RecordingService.ACTION_SAVE),
             )
@@ -220,11 +233,10 @@ class OverlayManager(private val context: Context) {
     }
 
     private fun onLongPress() {
-        if (RecordingService.state.value == RecordingService.State.Recording) {
+        if (isRecording() || RecordingService.state.value == RecordingService.State.Monitoring) {
             context.startService(
-                Intent(context, RecordingService::class.java).setAction(RecordingService.ACTION_STOP),
+                Intent(context, RecordingService::class.java).setAction(RecordingService.ACTION_OVERLAY_LONG_PRESS),
             )
-            Toast.makeText(context, "已停止循环录制", Toast.LENGTH_SHORT).show()
         } else {
             // 开始录制需要 MediaProjection 同意,只能由 Activity 发起:拉起主界面走引导
             val launch = context.packageManager.getLaunchIntentForPackage(context.packageName)
@@ -234,6 +246,10 @@ class OverlayManager(private val context: Context) {
                 Toast.makeText(context, "请在 App 内确认开始录制", Toast.LENGTH_SHORT).show()
             }
         }
+    }
+
+    private fun isRecording(): Boolean = RecordingService.state.value.let {
+        it == RecordingService.State.Recording || it == RecordingService.State.Saving
     }
 
     private fun dp(v: Int): Int =

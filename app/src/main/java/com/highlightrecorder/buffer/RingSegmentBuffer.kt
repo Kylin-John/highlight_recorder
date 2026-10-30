@@ -45,10 +45,17 @@ class RingSegmentBuffer(
 
     val segmentCount: Int get() = synchronized(lock) { segments.size }
 
+    /** 只读分片起尾元数据,不创建快照或复制编码包列表。 */
+    fun estimatedDurationUs(windowUs: Long, fromPtsUs: Long? = null): Long = synchronized(lock) {
+        val newestEnd = (openSegment ?: segments.peekLast())?.endPtsUs ?: return@synchronized 0L
+        val start = snapshotStartLocked(newestEnd, windowUs, fromPtsUs) ?: return@synchronized 0L
+        (newestEnd - start.startPtsUs).coerceAtLeast(0L)
+    }
+
     fun onPacket(packet: EncodedPacket) {
         synchronized(lock) {
             if (packet.isKeyFrame) {
-                openSegment?.let { segments.addLast(it) }
+                openSegment?.let { segments.addLast(it.seal()) }
                 openSegment = VideoSegment(packet.ptsUs)
                 evictLocked()
             } else if (openSegment == null) {
@@ -59,7 +66,7 @@ class RingSegmentBuffer(
                 val span = packet.ptsUs - seg.startPtsUs
                 if (span > hardSegmentUs) {
                     // 编码器迟迟不发 IDR:强制切段兜底,否则内存无限增长
-                    segments.addLast(seg)
+                    segments.addLast(seg.seal())
                     openSegment = VideoSegment(packet.ptsUs)
                     evictLocked()
                 } else if (span > softSegmentUs &&
@@ -77,17 +84,37 @@ class RingSegmentBuffer(
 
     /**
      * 取最近 [windowUs] 微秒的分片快照(含正在写入的开放分片)。
-     * 返回的列表按时间升序,首分片以 IDR 开头。
+     * [fromPtsUs] 为上次成功保存的媒体尾部,起点向前对齐实际 IDR,允许少量重叠。
+     * 返回的分片与包列表不再变化,编码载荷不复制。
      */
-    fun snapshot(windowUs: Long): List<VideoSegment> = synchronized(lock) {
+    fun snapshot(windowUs: Long, fromPtsUs: Long? = null): List<VideoSegment> = synchronized(lock) {
         val all = segments.toMutableList()
         openSegment?.takeIf { it.packets.isNotEmpty() }?.let { all.add(it) }
         if (all.isEmpty()) return@synchronized emptyList()
 
-        val newestEnd = all.last().endPtsUs
-        val cutoff = newestEnd - windowUs
-        val idx = all.indexOfFirst { it.endPtsUs >= cutoff }
-        all.subList(if (idx < 0) 0 else idx, all.size).toList()
+        val start = snapshotStartLocked(all.last().endPtsUs, windowUs, fromPtsUs)
+            ?: return@synchronized emptyList()
+        val idx = all.indexOf(start)
+        all.subList(idx, all.size).map { it.snapshot() }
+    }
+
+    /** 预计时长与实际快照共用起点选择,包含逐出与非 IDR 强制切段后的实际可用范围。 */
+    private fun snapshotStartLocked(newestEnd: Long, windowUs: Long, fromPtsUs: Long?): VideoSegment? {
+        if (fromPtsUs != null && newestEnd <= fromPtsUs) return null
+        val cutoff = maxOf(newestEnd - windowUs, fromPtsUs ?: Long.MIN_VALUE)
+        var firstIdr: VideoSegment? = null
+        var start: VideoSegment? = null
+        for (segment in segments) {
+            if (!segment.packets.first().isKeyFrame) continue
+            if (firstIdr == null) firstIdr = segment
+            // 截止点在两帧之间时仍向前找 IDR,避免漏掉期间画面。
+            if (segment.startPtsUs <= cutoff) start = segment
+        }
+        openSegment?.takeIf { it.packets.firstOrNull()?.isKeyFrame == true }?.let {
+            if (firstIdr == null) firstIdr = it
+            if (it.startPtsUs <= cutoff) start = it
+        }
+        return start ?: firstIdr
     }
 
     fun clear() = synchronized(lock) {

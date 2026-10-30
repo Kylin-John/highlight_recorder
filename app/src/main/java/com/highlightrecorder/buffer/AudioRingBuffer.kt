@@ -30,9 +30,9 @@ class AudioRingBuffer(
         }
     }
 
-    /** 取 pts >= [fromPtsUs] 的音频帧(升序)。 */
-    fun snapshot(fromPtsUs: Long): List<EncodedPacket> = synchronized(lock) {
-        packets.filter { it.ptsUs >= fromPtsUs }
+    /** 按与视频一致的媒体范围取音频帧(升序,两端包含)。 */
+    fun snapshot(fromPtsUs: Long, toPtsUs: Long = Long.MAX_VALUE): List<EncodedPacket> = synchronized(lock) {
+        packets.filter { it.ptsUs in fromPtsUs..toPtsUs }
     }
 
     fun clear() = synchronized(lock) {
