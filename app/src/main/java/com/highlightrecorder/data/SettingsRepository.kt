@@ -11,13 +11,21 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import java.io.IOException
 
 private val Context.dataStore by preferencesDataStore(name = "settings")
 
 /** 设置持久化(DataStore)。服务启动时经 [SettingsHolder] 读取快照。 */
-class SettingsRepository(private val context: Context) {
+class SettingsRepository(context: Context) {
+    private val context = context.applicationContext
 
     companion object {
+        // 少量有限的偏好写入可在服务停止后完成,不持有 Activity/Service 或启动常驻任务。
+        private val fpsWrites = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         private object Keys {
             val REWIND = intPreferencesKey("rewind_seconds")
             val SAVE_MODE = stringPreferencesKey("save_mode")
@@ -31,6 +39,8 @@ class SettingsRepository(private val context: Context) {
             val OVERLAY_EDGE = booleanPreferencesKey("overlay_edge_hide")
             val OVERLAY_HIDDEN = booleanPreferencesKey("overlay_hidden")
             val OVERLAY_LONG_PRESS = stringPreferencesKey("overlay_long_press_action")
+            val OVERLAY_DISPLAY = stringPreferencesKey("overlay_display")
+            val FPS_TARGET = stringPreferencesKey("fps_target_package")
             val TRASH_DAYS = intPreferencesKey("trash_auto_delete_days")
         }
 
@@ -49,6 +59,8 @@ class SettingsRepository(private val context: Context) {
             overlayEdgeHide = p[Keys.OVERLAY_EDGE] ?: false,
             overlayHidden = p[Keys.OVERLAY_HIDDEN] ?: false,
             overlayLongPressAction = OverlayLongPressAction.fromPreference(p[Keys.OVERLAY_LONG_PRESS]),
+            overlayDisplay = OverlayDisplay.fromPreference(p[Keys.OVERLAY_DISPLAY]),
+            fpsTargetPackage = p[Keys.FPS_TARGET] ?: "",
             trashAutoDeleteDays = p[Keys.TRASH_DAYS] ?: 30,
         )
 
@@ -65,15 +77,32 @@ class SettingsRepository(private val context: Context) {
             p[Keys.OVERLAY_EDGE] = s.overlayEdgeHide
             p[Keys.OVERLAY_HIDDEN] = s.overlayHidden
             p[Keys.OVERLAY_LONG_PRESS] = s.overlayLongPressAction.name
+            p[Keys.OVERLAY_DISPLAY] = s.overlayDisplay.name
+            p[Keys.FPS_TARGET] = s.fpsTargetPackage
             p[Keys.TRASH_DAYS] = s.trashAutoDeleteDays
         }
     }
 
     val settings: Flow<RecordingSettings> = context.dataStore.data.map { fromPrefs(it) }
+    val fpsApps: Flow<Map<String, FpsAppPreference>> = context.dataStore.data.map(FpsAppPreferences::read)
 
-    suspend fun update(transform: (RecordingSettings) -> RecordingSettings) {
-        context.dataStore.edit { p ->
-            writeTo(p, transform(fromPrefs(p)))
+    fun recordFpsUse(pkg: String) = writeFpsPreferences { p ->
+        FpsAppPreferences.recordUse(p, pkg, System.currentTimeMillis())
+    }
+
+    fun rememberFpsLayer(pkg: String, key: String) = writeFpsPreferences { p ->
+        FpsAppPreferences.rememberLayer(p, pkg, key)
+    }
+
+    private fun writeFpsPreferences(write: (MutablePreferences) -> Unit) {
+        fpsWrites.launch {
+            try { context.dataStore.edit { write(it) } }
+            catch (_: IOException) { android.util.Log.w("SettingsRepository", "FPS preferences could not be saved") }
         }
     }
+
+    suspend fun update(transform: (RecordingSettings) -> RecordingSettings): RecordingSettings =
+        fromPrefs(context.dataStore.edit { p ->
+            writeTo(p, transform(fromPrefs(p)))
+        })
 }

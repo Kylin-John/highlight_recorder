@@ -21,6 +21,10 @@ import com.highlightrecorder.data.OverlayLongPressAction
 import com.highlightrecorder.data.SettingsHolder
 import com.highlightrecorder.data.needsMic
 import com.highlightrecorder.overlay.OverlayManager
+import com.highlightrecorder.overlay.overlayContent
+import com.highlightrecorder.monitor.FpsReports
+import com.highlightrecorder.monitor.FpsSamplingSession
+import com.highlightrecorder.monitor.ShizukuFrames
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -48,6 +52,11 @@ class RecordingService : Service() {
         const val ACTION_SAVE = "com.highlightrecorder.action.SAVE"
         const val ACTION_OVERLAY_LONG_PRESS = "com.highlightrecorder.action.OVERLAY_LONG_PRESS"
         const val ACTION_REFRESH_OVERLAY = "com.highlightrecorder.action.REFRESH_OVERLAY"
+        const val ACTION_MONITOR_START = "com.highlightrecorder.action.MONITOR_START"
+        const val ACTION_FPS_REPORT = "com.highlightrecorder.action.FPS_REPORT"
+        const val ACTION_FPS_LAYER = "com.highlightrecorder.action.FPS_LAYER"
+        const val EXTRA_FPS_LAYER = "fps_layer"
+        const val EXTRA_OPEN_MONITOR = "open_monitor"
         const val EXTRA_RESULT_CODE = "extra_result_code"
         const val EXTRA_RESULT_DATA = "extra_result_data"
 
@@ -73,6 +82,7 @@ class RecordingService : Service() {
         data object Idle : State()
         data object Recording : State()
         data object Saving : State()
+        data object Monitoring : State()
         data class Error(val message: String) : State()
     }
 
@@ -84,6 +94,8 @@ class RecordingService : Service() {
     private var projection: MediaProjection? = null
     private var ticker: Job? = null
     private var overlay: OverlayManager? = null
+    private var fpsSession: FpsSamplingSession? = null
+    private var fpsFrames: ShizukuFrames? = null
 
     /** 降级状态:低电量/低内存时码率减半,恢复时还原。 */
     private var degraded = false
@@ -134,6 +146,7 @@ class RecordingService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_START -> {
+                if (fpsSession != null || pipeline != null) return START_NOT_STICKY
                 val resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, 0)
                 @Suppress("DEPRECATION")
                 val data = intent.getParcelableExtra<Intent>(EXTRA_RESULT_DATA)
@@ -147,13 +160,30 @@ class RecordingService : Service() {
             ACTION_SAVE -> saveClip()
             ACTION_OVERLAY_LONG_PRESS -> onOverlayLongPress()
             ACTION_REFRESH_OVERLAY -> refreshOverlay()
+            ACTION_MONITOR_START -> startMonitoring()
+            ACTION_FPS_LAYER -> {
+                val frames = fpsFrames
+                if (frames == null) stopSelf() else {
+                    val choice = frames.selectLayer(intent.getStringExtra(EXTRA_FPS_LAYER))
+                    FpsReports.live.value = FpsReports.live.value.copy(choice = choice, fps = null,
+                        status = "图层选择已接收;回到目标游戏后读取")
+                    updateOverlayContent()
+                }
+            }
+            ACTION_FPS_REPORT -> {
+                val session = fpsSession
+                if (session == null) stopSelf() else scope.launch {
+                    val report = withContext(Dispatchers.Default) { session.report() }
+                    if (fpsSession === session) FpsReports.current.value = report
+                }
+            }
             else -> Log.w(TAG, "unknown action: ${intent?.action}")
         }
-        return START_STICKY
+        return START_NOT_STICKY
     }
 
     private fun startRecording(resultCode: Int, data: Intent) {
-        if (pipeline != null) {
+        if (pipeline != null || fpsSession != null) {
             Log.w(TAG, "already recording")
             return
         }
@@ -212,6 +242,7 @@ class RecordingService : Service() {
             saveSession = RecordingSaveSession()
             p.start()
             state.value = State.Recording
+            startFpsSession(recording = true)
             startTicker()
             showOverlay()
             degraded = false
@@ -237,11 +268,66 @@ class RecordingService : Service() {
     }
 
     private fun stopRecording() {
-        FileLogger.log(TAG, "recording stopped")
+        FileLogger.log(TAG, if (state.value == State.Monitoring) "monitoring stopped" else "recording stopped")
         cleanup()
         state.value = State.Idle
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
+    }
+
+    /** 不创建 CapturePipeline/MediaProjection/音频或录像缓冲。 */
+    private fun startMonitoring() {
+        if (pipeline != null || fpsSession != null) return
+        try {
+            createChannel()
+            state.value = State.Monitoring
+            val notification = buildNotification("独立监测运行中")
+            if (Build.VERSION.SDK_INT >= 34) {
+                startForeground(NOTIF_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+            } else startForeground(NOTIF_ID, notification)
+            startFpsSession(recording = false)
+            startTicker()
+            showOverlay()
+        } catch (t: Exception) {
+            cleanup()
+            state.value = State.Error("无法启动独立监测: ${t.javaClass.simpleName}")
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
+        }
+    }
+
+    private fun startFpsSession(recording: Boolean) {
+        if (fpsSession != null) return
+        val target = SettingsHolder.current.fpsTargetPackage
+        com.highlightrecorder.data.SettingsRepository(this).recordFpsUse(target)
+        val frames = ShizukuFrames(this, target)
+        lateinit var session: FpsSamplingSession
+        session = FpsSamplingSession(target, recording, frames::read, onUpdate = { live ->
+            scope.launch {
+                if (fpsSession === session && frames.choice == live.choice) {
+                    if (live.fps != null && live.layer != null) frames.rememberSuccessfulLayer(live.layer)
+                    FpsReports.live.value = live
+                    updateOverlayContent()
+                }
+            }
+        }, selection = { frames.choice })
+        fpsFrames = frames
+        fpsSession = session
+        FpsReports.current.value = null
+        FpsReports.live.value = com.highlightrecorder.monitor.FpsLive(
+            active = true, targetPackage = target, recording = recording, status = "等待目标游戏与有效呈现数据",
+        )
+        session.start(CoroutineScope(scope.coroutineContext + Dispatchers.IO))
+    }
+
+    private fun stopFpsSession() {
+        val session = fpsSession ?: return
+        fpsSession = null
+        session.close()
+        fpsFrames?.close()
+        fpsFrames = null
+        FpsReports.live.value = FpsReports.live.value.copy(active = false, fps = null, status = "会话已结束")
+        FpsReports.complete(applicationContext, session)
     }
 
     /** 保存点击时固定的媒体范围,编码与录制全程不中断。 */
@@ -309,6 +395,11 @@ class RecordingService : Service() {
     }
 
     private fun onOverlayLongPress() {
+        if (state.value == State.Monitoring) {
+            stopRecording()
+            android.widget.Toast.makeText(this, "已结束监测,可在 App 查看报告", android.widget.Toast.LENGTH_SHORT).show()
+            return
+        }
         if (pipeline == null) return
         if (SettingsHolder.current.overlayLongPressAction == OverlayLongPressAction.SAVE_AND_STOP) {
             saveClip(stopAfterSave = true)
@@ -325,6 +416,7 @@ class RecordingService : Service() {
         estimatedSaveSeconds.value = ((p?.estimatedSaveDurationUs(
             settings.rewindSeconds * 1_000_000L, settings.saveMode,
         ) ?: 0L) / 1_000_000L).toInt()
+        updateOverlayContent()
     }
 
     private fun startTicker() {
@@ -362,6 +454,7 @@ class RecordingService : Service() {
     }
 
     private fun cleanup() {
+        stopFpsSession()
         saveSession?.close()
         saveSession = null
         ticker?.cancel()
@@ -388,8 +481,12 @@ class RecordingService : Service() {
 
     private fun fail(message: String) {
         FileLogger.log(TAG, "FAIL: $message")
+        // 编码错误也结束所附带的监测,不能留下错误状态下仍采样的会话。
+        cleanup()
         state.value = State.Error(message)
+        stopForeground(STOP_FOREGROUND_REMOVE)
         updateNotification(message)
+        stopSelf()
     }
 
     // ---- 悬浮窗 ----
@@ -397,12 +494,27 @@ class RecordingService : Service() {
     private fun showOverlay() {
         if (overlay == null) overlay = OverlayManager(this)
         overlay?.show()
-        overlay?.setRecordingState(true)
+        overlay?.setRecordingState(pipeline != null)
+        updateOverlayContent()
+    }
+
+    private fun updateOverlayContent() {
+        var live = FpsReports.live.value
+        val fps = live.currentFps(System.nanoTime())
+        if (live.active && live.fps != null && fps == null) {
+            live = live.copy(fps = null, status = "实时数值已过期;等待新的有效采样")
+            FpsReports.live.value = live
+        }
+        val settings = SettingsHolder.current
+        overlay?.setContent(
+            overlayContent(settings.overlayDisplay, fps, estimatedSaveSeconds.value.takeIf { pipeline != null }),
+            if (pipeline != null) "录制浮窗,单击保存,长按按设置停止" else "监测浮窗,单击查看详情,长按结束监测",
+        )
     }
 
     /** 设置变更后重建悬浮窗(隐藏开关/透明度/大小实时生效);未在录制则服务自停。 */
     private fun refreshOverlay() {
-        if (pipeline == null) {
+        if (pipeline == null && fpsSession == null) {
             stopSelf()
             return
         }
@@ -437,6 +549,8 @@ class RecordingService : Service() {
     }
 
     private fun buildNotification(text: String): Notification {
+        val monitoring = state.value == State.Monitoring
+        val terminal = state.value is State.Error
         val savePi = PendingIntent.getService(
             this, 1,
             Intent(this, RecordingService::class.java).setAction(ACTION_SAVE),
@@ -449,18 +563,22 @@ class RecordingService : Service() {
         )
         val openPi = PendingIntent.getActivity(
             this, 3,
-            packageManager.getLaunchIntentForPackage(packageName),
+            packageManager.getLaunchIntentForPackage(packageName)?.apply {
+                putExtra(EXTRA_OPEN_MONITOR, monitoring)
+            },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-        return Notification.Builder(this, CHANNEL_ID)
-            .setContentTitle("高光回录")
+        val builder = Notification.Builder(this, CHANNEL_ID)
+            .setContentTitle(if (monitoring) "游戏帧率监测" else "高光回录")
             .setContentText(text)
             .setSmallIcon(android.R.drawable.presence_video_online)
             .setContentIntent(openPi)
-            .addAction(Notification.Action.Builder(null, "保存回放", savePi).build())
-            .addAction(Notification.Action.Builder(null, "停止", stopPi).build())
-            .setOngoing(true)
-            .build()
+            .setOngoing(!terminal)
+        if (!terminal) {
+            if (!monitoring) builder.addAction(Notification.Action.Builder(null, "保存回放", savePi).build())
+            builder.addAction(Notification.Action.Builder(null, "停止", stopPi).build())
+        }
+        return builder.build()
     }
 
     private fun updateNotification(text: String) {
@@ -470,6 +588,7 @@ class RecordingService : Service() {
 
     override fun onDestroy() {
         cleanup()
+        if (state.value !is State.Error) state.value = State.Idle
         scope.cancel()
         super.onDestroy()
     }

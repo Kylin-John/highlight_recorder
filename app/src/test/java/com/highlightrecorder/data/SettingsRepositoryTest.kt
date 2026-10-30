@@ -7,6 +7,23 @@ import org.junit.Test
 
 class SettingsRepositoryTest {
     @Test
+    fun `旧浮窗配置默认存三种显示与目标均可往返且保留保存设置`() {
+        val original = RecordingSettings(saveMode = SaveMode.CONTINUATION,
+            overlayLongPressAction = OverlayLongPressAction.SAVE_AND_STOP, rewindSeconds = 120)
+        val prefs = mutablePreferencesOf()
+        SettingsRepository.writeTo(prefs, original)
+        prefs.remove(stringPreferencesKey("overlay_display"))
+        prefs.remove(stringPreferencesKey("fps_target_package"))
+        assertEquals(original, SettingsRepository.fromPrefs(prefs))
+        prefs[stringPreferencesKey("overlay_display")] = "unknown"
+        assertEquals(original, SettingsRepository.fromPrefs(prefs))
+        for (display in OverlayDisplay.entries) {
+            val settings = original.copy(overlayDisplay = display, fpsTargetPackage = "com.example.game")
+            SettingsRepository.writeTo(prefs, settings)
+            assertEquals(settings, SettingsRepository.fromPrefs(prefs))
+        }
+    }
+    @Test
     fun `旧设置缺少长按键时保留原有参数并默认直接停止`() {
         val old = RecordingSettings(rewindSeconds = 120, saveMode = SaveMode.CONTINUATION)
         val prefs = mutablePreferencesOf()

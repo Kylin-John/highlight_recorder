@@ -106,6 +106,10 @@ class OverlayManager(private val context: Context) {
         button?.setRecording(recording)
     }
 
+    fun setContent(text: String, description: String) {
+        button?.setContent(text, description)
+    }
+
     fun hide() {
         // 移除浮窗时取消未触发的长按,避免旧触摸操作落入新录制会话。
         handler.removeCallbacksAndMessages(null)
@@ -212,7 +216,14 @@ class OverlayManager(private val context: Context) {
     }
 
     private fun onClick() {
-        if (isRecording()) {
+        if (RecordingService.state.value == RecordingService.State.Monitoring) {
+            val launch = context.packageManager.getLaunchIntentForPackage(context.packageName)
+            launch?.let {
+                it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                it.putExtra(RecordingService.EXTRA_OPEN_MONITOR, true)
+                context.startActivity(it)
+            }
+        } else if (isRecording()) {
             context.startService(
                 Intent(context, RecordingService::class.java).setAction(RecordingService.ACTION_SAVE),
             )
@@ -222,7 +233,7 @@ class OverlayManager(private val context: Context) {
     }
 
     private fun onLongPress() {
-        if (isRecording()) {
+        if (isRecording() || RecordingService.state.value == RecordingService.State.Monitoring) {
             context.startService(
                 Intent(context, RecordingService::class.java).setAction(RecordingService.ACTION_OVERLAY_LONG_PRESS),
             )

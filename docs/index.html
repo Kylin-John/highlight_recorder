@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>高光回录 · 每一波天秀,都值得被留下</title>
-<meta name="description" content="开源 Android 游戏高光回录:悬浮球一键保存按下前 N 秒的屏幕画面。环形缓冲、硬件编码、零帧拷贝。">
+<meta name="description" content="开源 Android 游戏高光回录:循环缓冲、接续保存、可选浮窗内容与 Shizuku 游戏呈现 FPS 监测。">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='42' fill='%231b1b2f' stroke='white' stroke-width='4'/><circle cx='50' cy='50' r='22' fill='%23ff3b30'/></svg>">
 <style>
 :root{
@@ -134,22 +134,22 @@ footer a:hover{color:var(--txt)}
     <a href="#tech">技术</a>
   </div>
   <div style="display:flex;gap:10px">
-    <a class="btn btn-ghost" href="https://gitee.com/owen88ob/highlight-recorder" target="_blank">Gitee ↗</a>
-    <a class="btn btn-primary" href="https://github.com/owen88ob/highlight-recorder" target="_blank">GitHub ↗</a>
+    <a class="btn btn-ghost" href="https://gitee.com/owen88ob/highlight-recorder" target="_blank">原项目 Gitee ↗</a>
+    <a class="btn btn-primary" href="https://github.com/Kylin-John/highlight_recorder" target="_blank">Fork GitHub ↗</a>
   </div>
 </nav>
 
 <header>
   <div class="glow a"></div><div class="glow b"></div>
-  <div class="tag">开源 · Android 8.0+ · Fork 版本 <b>v1.2.3.2</b></div>
+  <div class="tag">开源 · Android 8.0+ · Fork 版本 <b>v1.2.3.6</b></div>
   <h1>每一波天秀,<br>都<span class="hl">值得被留下</span></h1>
-  <p class="sub">高光回录在后台静默循环录制你的屏幕,只保留最近 N 秒。
-  五杀落袋的那一刻,轻点悬浮球——刚才的高光,已经存好了。</p>
+  <p class="sub">高光回录在开启后持续缓冲最近 N 秒,支持接续保存与游戏呈现 FPS 监测。
+  精彩时刻发生后,轻点悬浮球即可保存此前的画面。</p>
   <div class="cta">
-    <a class="btn btn-primary" href="https://github.com/Kylin-John/highlight_recorder/releases/download/v1.2.3.2/app-debug.apk" target="_blank">⬇ 下载 APK</a>
-    <a class="btn btn-ghost" href="https://owen88ob.lanzoub.com/b01eup81ub" target="_blank">☁️ 蓝奏云下载(密码 owen)</a>
+    <a class="btn btn-primary" href="https://github.com/Kylin-John/highlight_recorder/releases/download/v1.2.3.6/HighlightRecorder-v1.2.3.6-debug.apk" target="_blank">⬇ 下载 APK</a>
+    <a class="btn btn-ghost" href="https://github.com/Kylin-John/highlight_recorder#搭配-shizuku-使用帧率监测" target="_blank">📖 使用与 Shizuku 教程</a>
     <a class="btn btn-ghost" href="https://github.com/owen88ob/highlight-recorder" target="_blank">⭐ Star on GitHub</a>
-    <a class="btn btn-ghost" href="https://gitee.com/owen88ob/highlight-recorder" target="_blank">Gitee 镜像</a>
+    <a class="btn btn-ghost" href="https://gitee.com/owen88ob/highlight-recorder" target="_blank">原项目 Gitee</a>
   </div>
   <div class="stats">
     <div><b>N 秒</b><span>回退时长 15–300s 可调</span></div>
@@ -160,7 +160,7 @@ footer a:hover{color:var(--txt)}
 
   <div class="phone">
     <div class="screen">
-      <div class="gameui">▲ 巅峰赛 · 排位<br>PING 28ms · FPS 120</div>
+      <div class="gameui">界面示意 · 非测量数据<br>▲ 巅峰赛 · 排位</div>
       <div class="kills">☠ 五连绝世!</div>
       <div class="fab">存<span class="rec"></span><span class="ring"></span></div>
       <div class="toast">✓ 已保存 30.0 秒高光</div>
@@ -172,21 +172,25 @@ footer a:hover{color:var(--txt)}
   <div class="reveal">
     <div class="kicker">Features</div>
     <h2>为游戏而生,也为体验较真</h2>
-    <p class="lead">不是"再录一个录屏软件"。它只做一件事,并把这件事做到极致:让保存高光这个动作,快到不打断你的下一波团战。</p>
+    <p class="lead">原项目的循环回录与音视频管理,加上 Kylin 开发的接续保存、预计时长、浮窗设置与游戏呈现帧率监测。</p>
   </div>
   <div class="grid">
     <div class="card reveal"><div class="ic">⏪</div><h3>时光倒流式录制</h3>
-      <p>环形缓冲常驻内存,只留最近 N+2 秒。按下保存的瞬间,从最近的关键帧切片拼接——不用提前开录,也不会存下整场对局。</p></div>
+      <p>环形缓冲常驻内存,只留最近 N+2 秒。先开启循环录制,精彩时刻发生后再按保存;按关键帧边界导出,不会自动保存整场对局。</p></div>
     <div class="card reveal"><div class="ic">🎈</div><h3>悬浮球随叫随到</h3>
-      <p>全屏游戏之上依旧可点。可拖动、松手自动贴边、透明度可调,呼吸红点提示录制状态。单击保存,长按停止。</p></div>
+      <p>全屏游戏之上依旧可点。可拖动、松手自动贴边、透明度可调,呼吸红点提示录制状态。录制时单击保存,长按可选直接停止或保存后停止。</p></div>
     <div class="card reveal"><div class="ic">⚡</div><h3>硬件级性能</h3>
-      <p>VirtualDisplay 直送 MediaCodec 输入面,全程零 Bitmap、零帧拷贝;编码声明 best-effort 为游戏让路。720p30 下额外占用仅几个百分点。</p></div>
+      <p>VirtualDisplay 直送 MediaCodec 输入面,全程零 Bitmap、零帧拷贝;编码声明 best-effort 优先级。实际耗电、发热和游戏影响取决于设备与参数,需要对照测量。</p></div>
     <div class="card reveal"><div class="ic">🔊</div><h3>音画同录,还能混音</h3>
-      <p>内录游戏原声(AudioPlaybackCapture)、麦克风解说,或两者实时混音——PCM 相加截幅合成单音轨,任何播放器都能正常播。</p></div>
+      <p>内录游戏原声(AudioPlaybackCapture)、麦克风解说,或两者实时混音——PCM 相加截幅合成单音轨,通过支持相应编码的播放器回放。</p></div>
     <div class="card reveal"><div class="ic">🛡️</div><h3>稳字当头</h3>
-      <p>前台服务 + 常驻通知;低电量、低内存自动降码率并提示,内存危急时体面暂停。被系统回收后自动尝试恢复。</p></div>
+      <p>前台服务 + 常驻通知;低电量、低内存时降低码率并提示,内存危急时结束录制。编码停滞时尝试有限次数恢复;系统终止会话后需重新开始。</p></div>
+    <div class="card reveal"><div class="ic">📊</div><h3>游戏呈现帧率监测</h3>
+      <p>Kylin 新增:通过 Shizuku 读取目标游戏图层的实际呈现时间戳,显示 FPS、曲线、均值与 1% low。可独立监测或随录制运行,依赖系统提供有效数据,不解锁游戏帧率。</p></div>
+    <div class="card reveal"><div class="ic">⏩</div><h3>接续保存与浮窗选择</h3>
+      <p>Kylin 新增:可选接续保存减少重复素材,主页展示预计成片秒数。浮窗可显示「存」、FPS 或预计秒数;主页统一选择监测游戏,常用应用靠前。</p></div>
     <div class="card reveal"><div class="ic">🎛️</div><h3>参数全可调</h3>
-      <p>回退时长 / 分辨率(720p~4K) / 帧率(30~120fps) / 码率 / H.264·H.265 / 音频来源 / 悬浮窗外观,实时显示内存与体积预估,改完即生效。深浅双色主题,跟随系统自动切换。</p></div>
+      <p>回退时长 / 分辨率(720p~4K) / 帧率(30~120fps) / 码率 / H.264·H.265 / 音频来源 / 悬浮窗外观,显示内存与体积预估;编码参数在新录制中应用,浮窗设置可在当前会话更新。深浅双色主题,跟随系统自动切换。</p></div>
   </div>
 </section>
 
@@ -197,8 +201,8 @@ footer a:hover{color:var(--txt)}
   </div>
   <div class="flow">
     <div class="step reveal"><h3>安装并授权</h3><p>首次打开引导页,逐项授予悬浮窗、通知等权限,每步都有"为什么需要它"的说明。</p></div>
-    <div class="step reveal"><h3>开始循环录制</h3><p>主页一键开始,系统弹窗确认一次即可。此后 App 在后台静默缓冲,你可以忘掉它。</p></div>
-    <div class="step reveal"><h3>打出高光,点一下</h3><p>五杀?神钩?单击悬浮球,最近 30 秒(可设)立刻在后台封装为 MP4,游戏零打断。</p></div>
+    <div class="step reveal"><h3>开始循环录制</h3><p>主页一键开始,每次新会话都需确认系统录屏弹窗,随后在后台持续缓冲;FPS 目标在主页选择。</p></div>
+    <div class="step reveal"><h3>打出高光,点一下</h3><p>五杀?神钩?单击悬浮球,按当前模式在后台封装为 MP4,导出期间继续采集;等待保存成功提示。</p></div>
     <div class="step reveal"><h3>回放与分享</h3><p>视频库内查看缩略图、时长与大小,一键播放、分享给队友;长按多选,批量分享或清理。</p></div>
   </div>
 </section>
@@ -206,15 +210,15 @@ footer a:hover{color:var(--txt)}
 <section id="tech">
   <div class="reveal">
     <div class="kicker">Under the Hood</div>
-    <h2>环形缓冲 + GOP 对齐,如何做到不花屏</h2>
-    <p class="lead">编码输出按实际到达的 IDR 关键帧切成 1 秒分片,容量固定逐出;保存时起点必为关键帧,PTS 重定基为 0——这是回放即点即播、首帧不花的根本原因。</p>
+    <h2>环形缓冲 + 关键帧对齐</h2>
+    <p class="lead">编码输出按实际到达的 IDR 关键帧切片,目标间隔约 1 秒;保存从关键帧起始并将 PTS 重定基。关键帧间隔与实际缓冲会影响成片时长。</p>
   </div>
   <div class="pipe reveal">
     <div class="node"><b>MediaProjection</b><span>VirtualDisplay<br>屏幕镜像</span></div>
     <div class="arrow">➜</div>
     <div class="node"><b>MediaCodec</b><span>硬件编码<br>零原始帧拷贝</span></div>
     <div class="arrow">➜</div>
-    <div class="node"><b>环形缓冲</b><span>按 IDR 切 1s 分片<br>只留 N+2 秒</span></div>
+    <div class="node"><b>环形缓冲</b><span>按实际 IDR 切片<br>只留 N+2 秒</span></div>
     <div class="arrow">➜</div>
     <div class="node"><b>MediaMuxer</b><span>IDR 边界拼接<br>PTS 重定基</span></div>
     <div class="arrow">➜</div>
@@ -236,6 +240,10 @@ footer a:hover{color:var(--txt)}
     <h2>更新日志</h2>
   </div>
   <div class="grid" style="grid-template-columns:1fr;margin-top:40px">
+    <div class="card reveal">
+      <h3>v1.2.3.6 <span style="color:var(--dim);font-size:13px;font-weight:400">2026-10-30 · Kylin Fork</span></h3>
+      <p>新增 Shizuku 游戏呈现 FPS 监测和独立监测,保留最近报告;自动匹配唯一 BLAST 图层并记住成功特征,常用应用靠前。主页统一选择监测目标,浮窗显示三选一,设置选中态更清晰。应用名为高光回录,附件为 HighlightRecorder-v1.2.3.6-debug.apk。具体使用条件和统计定义见 README。</p>
+    </div>
     <div class="card reveal">
       <h3>v1.2.3.2 <span style="color:var(--dim);font-size:13px;font-weight:400">2026-10-29 · Fork</span></h3>
       <p>主页保留缓存总量,新增当前保存模式下的预计成片秒数;接续保存成功后仍计入导出期间采集的内容。浮窗长按可选直接停止或保存后停止,默认保持直接停止;保存失败继续录制,已有导出时提示稍后重试。沿用独立包标识与原有 debug 签名。</p>
@@ -266,16 +274,16 @@ footer a:hover{color:var(--txt)}
 <div class="final reveal">
   <h2>下一波五杀,别再靠运气录到。</h2>
   <div class="cta">
-    <a class="btn btn-primary" href="https://github.com/Kylin-John/highlight_recorder/releases/download/v1.2.3.2/app-debug.apk" target="_blank">⬇ 下载 APK</a>
-    <a class="btn btn-ghost" href="https://owen88ob.lanzoub.com/b01eup81ub" target="_blank">☁️ 蓝奏云下载(密码 owen)</a>
-    <a class="btn btn-ghost" href="https://github.com/owen88ob/highlight-recorder" target="_blank">查看源码</a>
+    <a class="btn btn-primary" href="https://github.com/Kylin-John/highlight_recorder/releases/download/v1.2.3.6/HighlightRecorder-v1.2.3.6-debug.apk" target="_blank">⬇ 下载 APK</a>
+    <a class="btn btn-ghost" href="https://github.com/Kylin-John/highlight_recorder#搭配-shizuku-使用帧率监测" target="_blank">📖 使用与 Shizuku 教程</a>
+    <a class="btn btn-ghost" href="https://github.com/Kylin-John/highlight_recorder" target="_blank">查看 Fork 源码</a>
   </div>
 </div>
 
 <footer>
-  <div>高光回录 · GPL-3.0 License · © 2026 owen88ob</div>
-  <div><a href="https://github.com/owen88ob/highlight-recorder/issues" target="_blank">问题反馈</a> ·
-       <a href="https://github.com/owen88ob/highlight-recorder" target="_blank">GitHub</a> ·
+  <div>高光回录 · GPL-3.0 · 原作者 owen88ob · Fork 开发维护 Kylin / Kylin-John</div>
+  <div><a href="https://github.com/Kylin-John/highlight_recorder/issues" target="_blank">Fork 问题反馈</a> ·
+       <a href="https://github.com/Kylin-John/highlight_recorder" target="_blank">Fork GitHub</a> ·
        <a href="https://gitee.com/owen88ob/highlight-recorder" target="_blank">Gitee</a></div>
 </footer>
 

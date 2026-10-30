@@ -5,6 +5,13 @@ import org.junit.Test
 
 class RecordingSettingsTest {
     @Test
+    fun `浮窗显示默认存且兼容缺键和未知值`() {
+        assertEquals(OverlayDisplay.SAVE, RecordingSettings().overlayDisplay)
+        assertEquals(OverlayDisplay.SAVE, OverlayDisplay.fromPreference(null))
+        assertEquals(OverlayDisplay.SAVE, OverlayDisplay.fromPreference("unknown"))
+        OverlayDisplay.entries.forEach { assertEquals(it, OverlayDisplay.fromPreference(it.name)) }
+    }
+    @Test
     fun `新安装旧用户缺失配置及未知配置都使用原有保存模式`() {
         assertEquals(SaveMode.LAST_WINDOW, RecordingSettings().saveMode)
         assertEquals(SaveMode.LAST_WINDOW, SaveMode.fromPreference(null))

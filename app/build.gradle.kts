@@ -12,8 +12,8 @@ android {
         applicationId = "com.highlightrecorder"
         minSdk = 26
         targetSdk = 35
-        versionCode = 12
-        versionName = "1.2.3.2"
+        versionCode = 16
+        versionName = "1.2.3.6"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -22,7 +22,6 @@ android {
         debug {
             isMinifyEnabled = false
             applicationIdSuffix = ".continuationtest"
-            resValue("string", "app_name", "高光回录·接续测试")
         }
         release {
             isMinifyEnabled = false
@@ -42,6 +41,8 @@ android {
     }
     buildFeatures {
         compose = true
+        aidl = true
+        buildConfig = true
     }
 }
 
@@ -58,6 +59,8 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     implementation("androidx.datastore:datastore-preferences:1.1.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+    implementation("dev.rikka.shizuku:api:13.1.5")
+    implementation("dev.rikka.shizuku:provider:13.1.5")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 

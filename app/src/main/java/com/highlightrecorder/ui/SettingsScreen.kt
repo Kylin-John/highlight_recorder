@@ -4,8 +4,11 @@ import android.media.MediaCodecList
 import android.media.MediaFormat
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -13,14 +16,19 @@ import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Card
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -32,6 +40,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.highlightrecorder.data.AudioSource
 import com.highlightrecorder.data.OverlayLongPressAction
+import com.highlightrecorder.data.OverlayDisplay
 import com.highlightrecorder.data.SaveMode
 import com.highlightrecorder.data.needsMic
 import kotlin.math.roundToInt
@@ -111,7 +120,7 @@ fun SettingsScreen(viewModel: MainViewModel, onBack: () -> Unit) {
         }
 
         // ---- 帧率 ----
-        Section("帧率") {
+        Section("录制帧率") {
             ChipRow(
                 options = listOf(
                     30 to "30 fps", 60 to "60 fps", 90 to "90 fps", 120 to "120 fps",
@@ -119,7 +128,7 @@ fun SettingsScreen(viewModel: MainViewModel, onBack: () -> Unit) {
                 selected = settings.frameRate,
             ) { v -> viewModel.updateSettings { it.copy(frameRate = v) } }
             Text(
-                "90/120 fps 需要屏幕高刷与编码器性能支持,实际帧率以设备能力为准;" +
+                "这是视频编码目标,不代表游戏呈现 FPS。90/120 fps 需要屏幕高刷与编码器性能支持,实际录制帧率以设备能力为准;" +
                     "高帧率建议同步提高码率",
                 style = MaterialTheme.typography.bodySmall,
             )
@@ -195,21 +204,36 @@ fun SettingsScreen(viewModel: MainViewModel, onBack: () -> Unit) {
         }
 
         // ---- 悬浮窗 ----
+        Section("浮窗显示内容") {
+            listOf(
+                OverlayDisplay.SAVE to "存",
+                OverlayDisplay.FPS to "游戏呈现 FPS 数值",
+                OverlayDisplay.SAVE_SECONDS to "预计生成视频的秒数",
+            ).forEach { (display, label) ->
+                SettingChip(selected = settings.overlayDisplay == display,
+                    onClick = { viewModel.updateSettings { it.copy(overlayDisplay = display) } },
+                    label = label)
+            }
+            Text("FPS 不可用或未录制时，相应数值显示 —。",
+                style = MaterialTheme.typography.bodySmall)
+        }
+
         Section("浮窗长按行为") {
             // 纵向排列,避免小屏幕下两个长选项挤在同一行。
             listOf(
                 OverlayLongPressAction.STOP to "直接停止录制",
                 OverlayLongPressAction.SAVE_AND_STOP to "保存后停止录制",
             ).forEach { (action, label) ->
-                FilterChip(
+                SettingChip(
                     selected = settings.overlayLongPressAction == action,
                     onClick = { viewModel.updateSettings { it.copy(overlayLongPressAction = action) } },
-                    label = { Text(label) },
+                    label = label,
                 )
             }
             Text(
                 "保存后停止会使用当前保存模式;保存失败继续录制。" +
-                    "已有导出时请等待完成后再次长按。主页和通知栏的停止仍直接停止录制。",
+                    "已有导出时请等待完成后再次长按。主页和通知栏的停止仍直接停止录制。" +
+                    "独立监测时短按查看详情,长按仅结束监测。",
                 style = MaterialTheme.typography.bodySmall,
             )
         }
@@ -385,19 +409,46 @@ private fun Section(title: String, content: @Composable () -> Unit) {
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun <T> ChipRow(
     options: List<Pair<T, String>>,
     selected: T,
     onSelect: (T) -> Unit,
 ) {
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    FlowRow(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
         options.forEach { (value, label) ->
-            FilterChip(
+            SettingChip(
                 selected = value == selected,
                 onClick = { onSelect(value) },
-                label = { Text(label) },
+                label = label,
             )
         }
     }
+}
+
+@Composable
+private fun SettingChip(selected: Boolean, onClick: () -> Unit, label: String) {
+    val colors = MaterialTheme.colorScheme
+    FilterChip(
+        selected = selected,
+        onClick = onClick,
+        label = { Text(label, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal) },
+        leadingIcon = if (selected) {
+            { Icon(Icons.Default.Check, contentDescription = null,
+                modifier = Modifier.size(FilterChipDefaults.IconSize)) }
+        } else null,
+        colors = FilterChipDefaults.filterChipColors(
+            containerColor = colors.surface,
+            labelColor = colors.onSurfaceVariant,
+            selectedContainerColor = colors.primaryContainer,
+            selectedLabelColor = colors.onPrimaryContainer,
+            selectedLeadingIconColor = colors.onPrimaryContainer,
+        ),
+        border = BorderStroke(if (selected) 1.5.dp else 1.dp,
+            if (selected) colors.primary else colors.outlineVariant),
+    )
 }

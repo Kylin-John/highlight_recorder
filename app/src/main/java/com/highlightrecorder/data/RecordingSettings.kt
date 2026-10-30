@@ -22,11 +22,23 @@ data class RecordingSettings(
     val overlayHidden: Boolean = false,
     /** 缺省沿用长按浮窗直接停止录制。 */
     val overlayLongPressAction: OverlayLongPressAction = OverlayLongPressAction.STOP,
+    val overlayDisplay: OverlayDisplay = OverlayDisplay.SAVE,
+    /** 在会话开始前选择目标,不随前台应用自动换成另一个游戏。 */
+    val fpsTargetPackage: String = "",
     /** 回收站自动清理天数。 */
     val trashAutoDeleteDays: Int = 30,
 )
 
 enum class AudioSource { INTERNAL, MIC, INTERNAL_AND_MIC, MUTE }
+
+enum class OverlayDisplay {
+    SAVE, FPS, SAVE_SECONDS;
+
+    companion object {
+        fun fromPreference(value: String?): OverlayDisplay =
+            entries.firstOrNull { it.name == value } ?: SAVE
+    }
+}
 
 enum class SaveMode {
     LAST_WINDOW, CONTINUATION;
